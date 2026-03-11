@@ -1,6 +1,12 @@
 # The Forge
 
-An AI-powered item generator for Terraria. Describe any weapon you can imagine and The Forge will design it, write the mod code, generate pixel art, and inject it into your game — all from a terminal interface.
+Is an agentic item generator for Terraria. Describe any weapon you can imagine and The Forge will design it, write the mod code, generate pixel art, and inject it into your game all from the terminal interface.
+
+<img width="1364" height="703" alt="Screenshot 2026-03-11 at 11 13 51 AM" src="https://github.com/user-attachments/assets/ee8874e7-dd91-4678-bc0e-2ba1f12ec945" />
+
+
+
+
 
 ![Go](https://img.shields.io/badge/TUI-Go%20%2F%20BubbleTea-00ADD8)
 ![Python](https://img.shields.io/badge/Pipeline-Python-3776AB)
@@ -9,10 +15,10 @@ An AI-powered item generator for Terraria. Describe any weapon you can imagine a
 ## How It Works
 
 1. **You describe a weapon** — "A frost katana that shoots ice shards"
-2. **The Architect** designs a balanced item manifest (stats, crafting recipe, visuals)
-3. **The Forge Master** writes compilable C# mod code for tModLoader
-4. **The Pixelsmith** generates a pixel art sprite via AI image generation
-5. **The Gatekeeper** compiles the mod and stages it into your ModSources
+2. **The Architect Agent** designs a balanced item manifest (stats, crafting recipe, visuals)
+3. **The Forge Master Agent** writes compilable C# mod code for tModLoader and tests it
+4. **The Pixelsmith Agent** generates a pixel art sprite via AI image generation
+5. **The Gatekeeper Agent** compiles the mod and stages it into your ModSources
 6. **ForgeConnector** hot-reloads the mod into your running Terraria game
 
 The entire pipeline runs from a single terminal UI. You pick your weapon idea, choose a power tier, and watch it get built in real time.
@@ -142,6 +148,3 @@ Swords, broadswords, bows, guns, staves, wands, spears, yoyos, flails, whips, su
 
 If your prompt references a known character or item ("a sword like the Master Sword", "Naruto's kunai"), the Architect will search for reference images using Playwright and use them to guide the sprite generation for higher fidelity.
 
-## License
-
-MIT
