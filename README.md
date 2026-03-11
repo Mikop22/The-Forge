@@ -47,7 +47,7 @@ Create `agents/.env` with your keys:
 ```env
 OPENAI_API_KEY=your-openai-key
 FAL_KEY=your-fal-key
-FAL_IMAGE_TO_IMAGE_ENABLED=true # this controls if the app will use your browswer to look for reference images of real objects or people
+FAL_IMAGE_TO_IMAGE_ENABLED=true # This controls if the app will look for reference images of real objects
 ```
 
 | Key | What it's for |
