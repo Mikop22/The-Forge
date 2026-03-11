@@ -1,0 +1,3 @@
+displayName = ForgeConnector
+author = The Forge
+version = 1.0.0
