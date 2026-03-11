@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+
+# Python (agents)
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+.lora_url_cache.json
+
+# .NET / C# (Terraria mod)
+bin/
+obj/
+*.user
+*.suo
+.vs/
+[Dd]ebug/
+[Rr]elease/
+*.dll
+*.pdb
+*.cache
+packages/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/theforge
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+*.log
+Thumbs.db
