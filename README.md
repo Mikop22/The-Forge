@@ -160,3 +160,8 @@ Swords, broadswords, bows, guns, staves, wands, spears, yoyos, flails, whips, su
 
 If your prompt references a known character or item ("a sword like the Master Sword", "Naruto's kunai"), the Architect will search for reference images using Playwright and use them to guide the sprite generation for higher fidelity.
 
+## Technical Documentation
+
+For a deep technical breakdown of every component, data contract, IPC mechanism, and
+error-handling strategy, see [TECHNICAL.md](TECHNICAL.md).
+
