@@ -23,6 +23,8 @@ Is an agentic item generator for Terraria. Describe any weapon you can imagine a
 
 The entire pipeline runs from a single terminal UI. You pick your weapon idea, choose a power tier, and watch it get built in real time.
 
+If I had to point to the most impactful automation or AI agent I’ve built, it would be The Forge: a multi-agent system that turns a plain-English weapon idea into a playable Terraria item by automatically designing the weapon, generating the C# tModLoader code, creating matching pixel art, compiling the mod, and injecting it into a live game session. I built it with a Go Bubble Tea terminal UI, a Python orchestration layer, specialized agents for design/code/sprite generation/build validation, OpenAI-powered generation, fal-ai image tooling, and a custom ForgeConnector bridge mod. The impact is that it compresses what would normally take a modder hours of design, coding, art, and manual testing into a guided workflow that can produce usable in-game content in minutes.
+
 ## Prerequisites
 
 - **Terraria** with **tModLoader** installed via Steam
@@ -159,4 +161,3 @@ Swords, broadswords, bows, guns, staves, wands, spears, yoyos, flails, whips, su
 ## Reference-Aware Generation
 
 If your prompt references a known character or item ("a sword like the Master Sword", "Naruto's kunai"), the Architect will search for reference images using Playwright and use them to guide the sprite generation for higher fidelity.
-
