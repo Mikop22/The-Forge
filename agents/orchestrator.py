@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
-from watchdog.events import FileModifiedEvent, FileSystemEventHandler
+from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 # ---------------------------------------------------------------------------
@@ -45,6 +46,7 @@ _HOME = Path.home()
 _MOD_SOURCES = _HOME / "Library" / "Application Support" / "Terraria" / "tModLoader" / "ModSources"
 REQUEST_FILE = _MOD_SOURCES / "user_request.json"
 STATUS_FILE = _MOD_SOURCES / "generation_status.json"
+HEARTBEAT_FILE = _MOD_SOURCES / "orchestrator_alive.json"
 
 # Where Pixelsmith drops sprites and Forge Master drops code
 _AGENTS_ROOT = Path(__file__).resolve().parent
@@ -60,6 +62,24 @@ def _write_status(payload: dict) -> None:
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(STATUS_FILE)
     log.info("Status → %s", payload.get("status"))
+
+
+def _write_heartbeat() -> None:
+    HEARTBEAT_FILE.write_text(
+        json.dumps({
+            "status": "listening",
+            "pid": os.getpid(),
+            "timestamp": time.time(),
+        }, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_heartbeat() -> None:
+    try:
+        HEARTBEAT_FILE.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _set_stage(label: str, pct: int) -> None:
@@ -185,7 +205,7 @@ _DEBOUNCE_SECONDS = 1.0
 
 
 class _RequestHandler(FileSystemEventHandler):
-    """Fires the pipeline when ``user_request.json`` is modified."""
+    """Fires the pipeline when ``user_request.json`` changes."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         super().__init__()
@@ -193,10 +213,10 @@ class _RequestHandler(FileSystemEventHandler):
         self._loop = loop
         self._lock = asyncio.Lock()
 
-    def on_modified(self, event):
-        if not isinstance(event, FileModifiedEvent):
+    def _handle_request_event(self, path: Path) -> None:
+        if path.resolve() != REQUEST_FILE.resolve():
             return
-        if Path(event.src_path).resolve() != REQUEST_FILE.resolve():
+        if not REQUEST_FILE.exists():
             return
 
         now = time.monotonic()
@@ -217,6 +237,21 @@ class _RequestHandler(FileSystemEventHandler):
         # Schedule on the main event loop from this watchdog thread.
         asyncio.run_coroutine_threadsafe(self._run_safe(payload), self._loop)
 
+    def on_created(self, event) -> None:
+        if event.is_directory:
+            return
+        self._handle_request_event(Path(event.src_path))
+
+    def on_modified(self, event) -> None:
+        if event.is_directory:
+            return
+        self._handle_request_event(Path(event.src_path))
+
+    def on_moved(self, event) -> None:
+        if event.is_directory:
+            return
+        self._handle_request_event(Path(event.dest_path))
+
     async def _run_safe(self, request: dict) -> None:
         """Execute the pipeline with top-level error handling."""
         async with self._lock:  # serialise concurrent requests
@@ -235,9 +270,11 @@ def main() -> None:
     log.info("The Forge Orchestrator starting up")
     log.info("Watching: %s", REQUEST_FILE)
     log.info("Status:   %s", STATUS_FILE)
+    log.info("Heartbeat: %s", HEARTBEAT_FILE)
 
     # Ensure the watched directory exists.
     REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _write_heartbeat()
 
     # Keep the asyncio event loop alive so pipeline tasks can run.
     loop = asyncio.new_event_loop()
@@ -257,6 +294,7 @@ def main() -> None:
     finally:
         observer.stop()
         observer.join()
+        _clear_heartbeat()
         loop.close()
         log.info("Orchestrator stopped.")
 

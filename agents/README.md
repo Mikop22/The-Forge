@@ -26,3 +26,19 @@ Fallback behavior:
 
 - Any reference lookup or approval failure falls back to `text_to_image`.
 - `image_to_image` requests without a reference URL or with capability disabled fall back to `text_to_image`.
+
+## Manual smoke harness
+
+Run the isolated orchestrator smoke test from the `agents/` directory:
+
+```bash
+./.venv/bin/python orchestrator_smoke.py
+```
+
+What it verifies:
+
+- Starts the real orchestrator entrypoint in a temporary `HOME`
+- Forces a polling observer backend for sandbox-friendly file watching
+- Writes `user_request.json` atomically
+- Waits for `generation_status.json` to reach `ready`
+- Shuts the subprocess down and checks heartbeat cleanup

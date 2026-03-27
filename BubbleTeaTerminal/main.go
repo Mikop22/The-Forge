@@ -191,7 +191,12 @@ func writeUserRequest(prompt, tier, craftingStation string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "user_request.json"), data, 0644)
+	dst := filepath.Join(dir, "user_request.json")
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 type pipelineStatus struct {
@@ -251,10 +256,10 @@ func writeCommandTrigger() error {
 	return os.Rename(tmp, dst)
 }
 
-// readBridgeHeartbeat returns true if forge_connector_alive.json exists,
+// readHeartbeatFile returns true if the JSON heartbeat file exists,
 // has status "listening", and its PID is still alive.
-func readBridgeHeartbeat() bool {
-	data, err := os.ReadFile(filepath.Join(modSourcesDir(), "forge_connector_alive.json"))
+func readHeartbeatFile(path string) bool {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -276,6 +281,18 @@ func readBridgeHeartbeat() bool {
 	}
 	// Signal(0) checks liveness without sending a real signal.
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// readBridgeHeartbeat returns true if forge_connector_alive.json exists
+// and points at a live bridge process.
+func readBridgeHeartbeat() bool {
+	return readHeartbeatFile(filepath.Join(modSourcesDir(), "forge_connector_alive.json"))
+}
+
+// readOrchestratorHeartbeat returns true if orchestrator_alive.json exists
+// and points at a live orchestrator process.
+func readOrchestratorHeartbeat() bool {
+	return readHeartbeatFile(filepath.Join(modSourcesDir(), "orchestrator_alive.json"))
 }
 
 func initialModel() model {
@@ -891,7 +908,43 @@ func findOrchestratorPath() string {
 	return ""
 }
 
+func trimDotEnvComment(val string) string {
+	inQuote := byte(0)
+	escaped := false
+
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote != 0 {
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == inQuote {
+				inQuote = 0
+			}
+			continue
+		}
+
+		switch ch {
+		case '"', '\'':
+			inQuote = ch
+		case '#':
+			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' {
+				return strings.TrimSpace(val[:i])
+			}
+		}
+	}
+
+	return strings.TrimSpace(val)
+}
+
 // parseDotEnv reads a .env file and returns key=value pairs.
+// Handles quoted values and strips inline comments outside quotes.
 func parseDotEnv(path string) []string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -903,9 +956,20 @@ func parseDotEnv(path string) []string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.Contains(line, "=") {
-			pairs = append(pairs, line)
+		eqIdx := strings.Index(line, "=")
+		if eqIdx < 0 {
+			continue
 		}
+		key := strings.TrimSpace(line[:eqIdx])
+		val := strings.TrimSpace(line[eqIdx+1:])
+		val = trimDotEnvComment(val)
+
+		// Strip surrounding quotes.
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+
+		pairs = append(pairs, key+"="+val)
 	}
 	return pairs
 }
@@ -915,11 +979,12 @@ func parseDotEnv(path string) []string {
 func ensureOrchestrator() {
 	orchPath := findOrchestratorPath()
 	if orchPath == "" {
+		fmt.Fprintln(os.Stderr, "[forge] orchestrator.py not found — set FORGE_ORCHESTRATOR_PATH or run from the project root")
 		return
 	}
 
-	// Skip if already running.
-	if err := exec.Command("pgrep", "-f", "orchestrator.py").Run(); err == nil {
+	// Skip only if the orchestrator heartbeat shows a live Python daemon.
+	if readOrchestratorHeartbeat() {
 		return
 	}
 
