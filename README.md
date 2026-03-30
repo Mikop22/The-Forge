@@ -19,7 +19,7 @@ Is an agentic item generator for Terraria. Describe any weapon you can imagine a
 3. **The Forge Master Agent** writes compilable C# mod code for tModLoader and tests it
 4. **The Pixelsmith Agent** generates a pixel art sprite via AI image generation
 5. **The Gatekeeper Agent** compiles the mod and stages it into your ModSources
-6. **ForgeConnector** hot-reloads the mod into your running Terraria game
+6. **ForgeConnector** hot-reloads the mod into your running Terraria game and signals back to the TUI when the reload is complete
 
 The entire pipeline runs from a single terminal UI. You pick your weapon idea, choose a power tier, and watch it get built in real time.
 
@@ -123,7 +123,8 @@ That's it. The TUI will auto-start the Python orchestrator in the background.
    - **Manual** — Walk through a wizard to choose tier, damage class, weapon style, projectile, and crafting station
 3. **Watch it build** — the heat bar tracks each pipeline stage in real time
 4. **Staging screen** — your item is ready:
-   - If Terraria is running with ForgeConnector, press **Enter** to inject the item live
+   - The sprite is rendered directly in the terminal alongside the item's stats
+   - If Terraria is running with ForgeConnector, press **Enter** to inject the item live — the TUI waits for a confirmation signal from the game before marking the reload complete
    - Press **C** to craft another item without losing your inventory
 
 ### Power Tiers

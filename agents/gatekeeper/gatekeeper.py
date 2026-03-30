@@ -101,8 +101,8 @@ class Integrator:
             if result.success:
                 self._ensure_mod_enabled("ForgeGeneratedMod")
                 self._write_status({
-                    "status": "ready",
-                    "message": "Compilation successful. Waiting for user...",
+                    "status": "finishing",
+                    "message": "Compilation successful. Finalizing...",
                 })
                 return GatekeeperResult(
                     status="success",
@@ -157,6 +157,14 @@ class Integrator:
             cs_code = repair_result["cs_code"]
             self._stage_files(cs_code, hjson_code, item_name, sprite_path=None, projectile_sprite_path=None)
 
+        # Should be unreachable, but guard against falling through.
+        return GatekeeperResult(
+            status="error",
+            item_name=item_name,
+            attempts=self._max_retries + 1,
+            error_message="Build loop exited unexpectedly.",
+        ).model_dump()
+
     @staticmethod
     def _parse_errors(output: str) -> list[RoslynError]:
         """Extract structured Roslyn errors from dotnet build output."""
@@ -180,9 +188,11 @@ class Integrator:
         """Write generation_status.json to the mod root directory."""
         self._mod_root.mkdir(parents=True, exist_ok=True)
         status_path = self._mod_root / "generation_status.json"
-        status_path.write_text(
+        tmp_path = status_path.with_suffix(".tmp")
+        tmp_path.write_text(
             json.dumps(status_dict, indent=2) + "\n", encoding="utf-8"
         )
+        tmp_path.replace(status_path)
 
     def _stage_files(
         self,

@@ -32,6 +32,11 @@ type uiStyles struct {
 	SigilColumn  lipgloss.Style
 	Meta         lipgloss.Style
 	Body         lipgloss.Style
+	SpriteFrame  lipgloss.Style
+	StatsFrame   lipgloss.Style
+	StatsLabel   lipgloss.Style
+	StatsValue   lipgloss.Style
+	StatsTitle   lipgloss.Style
 }
 
 var styles = newStyles()
@@ -90,5 +95,21 @@ func newStyles() uiStyles {
 			Foreground(colorGold),
 		Body: lipgloss.NewStyle().
 			Foreground(colorText),
+		SpriteFrame: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorDim).
+			Padding(0, 1),
+		StatsFrame: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGold).
+			Padding(0, 1).
+			Width(26),
+		StatsLabel: lipgloss.NewStyle().
+			Foreground(colorGold),
+		StatsValue: lipgloss.NewStyle().
+			Foreground(colorText),
+		StatsTitle: lipgloss.NewStyle().
+			Foreground(colorRune).
+			Bold(true),
 	}
 }

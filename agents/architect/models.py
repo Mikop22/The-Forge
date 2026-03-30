@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -243,13 +244,15 @@ class Mechanics(BaseModel):
     crafting_tile: str
 
 
-def _to_pascal_case(name: str) -> str:
-    """Sanitize a string into a valid PascalCase C# identifier."""
-    # Replace non-alphanumeric chars with spaces
-    cleaned = re.sub(r"[^a-zA-Z0-9]", " ", name)
-    # Also split on existing camelCase / PascalCase boundaries
-    cleaned = re.sub(r"([a-z])([A-Z])", r"\1 \2", cleaned)
-    return "".join(word.capitalize() for word in cleaned.split())
+try:
+    from utils import to_pascal_case as _to_pascal_case
+except ImportError:
+    # Fallback: parent directory may not be on sys.path
+    from pathlib import Path as _Path
+    _parent = str(_Path(__file__).resolve().parent.parent)
+    if _parent not in sys.path:
+        sys.path.insert(0, _parent)
+    from utils import to_pascal_case as _to_pascal_case
 
 
 class ItemManifest(BaseModel):

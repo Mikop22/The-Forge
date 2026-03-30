@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -12,11 +13,14 @@ from pydantic import BaseModel, Field, field_validator
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _to_pascal_case(name: str) -> str:
-    """Sanitize a string into a valid PascalCase C# identifier."""
-    cleaned = re.sub(r"[^a-zA-Z0-9]", " ", name)
-    cleaned = re.sub(r"([a-z])([A-Z])", r"\1 \2", cleaned)
-    return "".join(word.capitalize() for word in cleaned.split())
+try:
+    from utils import to_pascal_case as _to_pascal_case
+except ImportError:
+    from pathlib import Path as _Path
+    _parent = str(_Path(__file__).resolve().parent.parent)
+    if _parent not in sys.path:
+        sys.path.insert(0, _parent)
+    from utils import to_pascal_case as _to_pascal_case
 
 
 # ---------------------------------------------------------------------------

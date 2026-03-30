@@ -3,6 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	_ "image/png"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +38,8 @@ type injectDoneMsg struct{ err error }
 type bridgeStatusMsg struct{ alive bool }
 
 type animTickMsg time.Time
+type pollConnectorStatusMsg struct{ attempt int }
+type connectorStatusMsg struct{ status string }
 
 type optionItem struct {
 	title string
@@ -44,13 +50,23 @@ func (i optionItem) Title() string       { return i.title }
 func (i optionItem) Description() string { return i.desc }
 func (i optionItem) FilterValue() string { return i.title }
 
+type itemStats struct {
+	Damage     int     `json:"damage"`
+	Knockback  float64 `json:"knockback"`
+	CritChance int     `json:"crit_chance"`
+	UseTime    int     `json:"use_time"`
+	Rarity     string  `json:"rarity"`
+}
+
 type craftedItem struct {
-	label          string
-	tier           string
-	damageClass    string
-	styleChoice    string
-	projectile     string
+	label           string
+	tier            string
+	damageClass     string
+	styleChoice     string
+	projectile      string
 	craftingStation string
+	stats           itemStats
+	spritePath      string
 }
 
 type wizardStep struct {
@@ -139,8 +155,12 @@ type model struct {
 	stageLabel     string // current pipeline stage label
 	stageTargetPct int    // target heat % from pipeline status
 
-	bridgeAlive bool   // forge_connector_alive.json present with live PID
-	injectErr   string // non-empty if command_trigger write failed
+	forgeManifest map[string]interface{} // full manifest from backend
+	forgeSprPath  string                 // sprite PNG path from backend
+
+	bridgeAlive   bool   // forge_connector_alive.json present with live PID
+	injectErr     string // non-empty if command_trigger write failed
+	injectStatus  string // "reload_triggered", "reload_failed", "timeout", or ""
 }
 
 const (
@@ -205,6 +225,8 @@ type pipelineStatus struct {
 	errMsg     string
 	stagePct   int
 	stageLabel string
+	manifest   map[string]interface{}
+	spritePath string
 }
 
 func readGenerationStatus() pipelineStatus {
@@ -226,6 +248,10 @@ func readGenerationStatus() pipelineStatus {
 	if pct, ok := result["stage_pct"].(float64); ok {
 		ps.stagePct = int(pct)
 	}
+	if manifest, ok := result["manifest"].(map[string]interface{}); ok {
+		ps.manifest = manifest
+	}
+	ps.spritePath, _ = result["sprite_path"].(string)
 	return ps
 }
 
@@ -235,12 +261,34 @@ func pollStatusCmd() tea.Cmd {
 	})
 }
 
+func pollConnectorStatusCmd(attempt int) tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return pollConnectorStatusMsg{attempt: attempt}
+	})
+}
+
+func readConnectorStatus() string {
+	data, err := os.ReadFile(filepath.Join(modSourcesDir(), "forge_connector_status.json"))
+	if err != nil {
+		return ""
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ""
+	}
+	status, _ := result["status"].(string)
+	return status
+}
+
 // writeCommandTrigger atomically writes command_trigger.json to ModSources.
+// It also removes any stale forge_connector_status.json so the TUI does not
+// read a result from a previous execution.
 func writeCommandTrigger() error {
 	dir := modSourcesDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+	_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
 	data, err := json.Marshal(map[string]string{
 		"action":    "execute",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -509,6 +557,8 @@ func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch ps.status {
 		case "ready":
 			m.forgeItemName = ps.itemName
+			m.forgeManifest = ps.manifest
+			m.forgeSprPath = ps.spritePath
 			m.heat = 100
 			return m, func() tea.Msg { return forgeDoneMsg{} }
 		case "error":
@@ -551,10 +601,25 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bridgeAlive = msg.alive
 		return m, nil
 	case injectDoneMsg:
-		m.injecting = false
 		if msg.err != nil {
+			m.injecting = false
 			m.injectErr = msg.err.Error()
+			return m, nil
 		}
+		// Trigger written successfully — poll for connector confirmation.
+		return m, pollConnectorStatusCmd(0)
+	case pollConnectorStatusMsg:
+		const maxAttempts = 20 // 10 seconds at 500ms intervals
+		if status := readConnectorStatus(); status != "" {
+			return m, func() tea.Msg { return connectorStatusMsg{status: status} }
+		}
+		if msg.attempt >= maxAttempts {
+			return m, func() tea.Msg { return connectorStatusMsg{status: "timeout"} }
+		}
+		return m, pollConnectorStatusCmd(msg.attempt + 1)
+	case connectorStatusMsg:
+		m.injecting = false
+		m.injectStatus = msg.status
 		return m, nil
 	}
 
@@ -569,6 +634,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.injecting = true
 			m.injectErr = ""
+			m.injectStatus = ""
 			injectCmd := func() tea.Msg {
 				return injectDoneMsg{err: writeCommandTrigger()}
 			}
@@ -670,46 +736,91 @@ func (m model) forgeView() string {
 }
 
 func (m model) stagingView() string {
-	lines := []string{
+	headerLines := []string{
 		styles.Success.Render("✔ Item Ready"),
 		styles.Subtitle.Render("Staging Area"),
 		"",
 	}
 
 	if len(m.craftedItems) == 0 {
-		lines = append(lines, styles.Hint.Render("No crafted items yet."))
+		headerLines = append(headerLines, styles.Hint.Render("No crafted items yet."))
 	} else {
-		for i, item := range m.craftedItems {
-			lines = append(lines, styles.Inventory.Render(fmt.Sprintf("%d. %s", i+1, m.revealItem(item.label))))
-			if m.revealPhase >= 3 && (item.damageClass != "" || item.styleChoice != "" || item.projectile != "") {
-				meta := buildMetaLine(item)
-				if meta != "" {
-					lines = append(lines, styles.Meta.Render("   "+meta))
+		// Show the latest item with sprite + stats preview.
+		latest := m.craftedItems[len(m.craftedItems)-1]
+
+		// Item name
+		headerLines = append(headerLines, styles.Inventory.Render(m.revealItem(latest.label)))
+		if m.revealPhase >= 3 && (latest.damageClass != "" || latest.styleChoice != "" || latest.projectile != "") {
+			meta := buildMetaLine(latest)
+			if meta != "" {
+				headerLines = append(headerLines, styles.Meta.Render(meta))
+			}
+		}
+
+		// Sprite + Stats side-by-side (only after full reveal)
+		if m.revealPhase >= 3 {
+			sprite := renderSprite(latest.spritePath)
+			stats := renderStats(latest.stats)
+
+			if sprite != "" || stats != "" {
+				headerLines = append(headerLines, "")
+				var panels []string
+				if sprite != "" {
+					spriteBox := styles.SpriteFrame.Render(sprite)
+					panels = append(panels, spriteBox)
 				}
+				if stats != "" {
+					statsBox := styles.StatsFrame.Render(stats)
+					panels = append(panels, statsBox)
+				}
+				if len(panels) == 2 {
+					headerLines = append(headerLines, lipgloss.JoinHorizontal(lipgloss.Top, panels[0], "  ", panels[1]))
+				} else if len(panels) == 1 {
+					headerLines = append(headerLines, panels[0])
+				}
+			}
+		}
+
+		// Previous items (compact list)
+		if len(m.craftedItems) > 1 {
+			headerLines = append(headerLines, "", styles.Hint.Render("Previous:"))
+			for i := 0; i < len(m.craftedItems)-1; i++ {
+				item := m.craftedItems[i]
+				headerLines = append(headerLines, styles.Hint.Render(fmt.Sprintf("  %d. %s", i+1, item.label)))
 			}
 		}
 	}
 
-	lines = append(lines, "")
+	headerLines = append(headerLines, "")
 
 	// Bridge status line.
 	if m.bridgeAlive {
-		lines = append(lines, styles.Success.Render("⬡ Bridge Online"))
+		headerLines = append(headerLines, styles.Success.Render("⬡ Bridge Online"))
 	} else {
-		lines = append(lines, styles.Hint.Render("⬡ Bridge Offline — open Terraria with ForgeConnector loaded"))
+		headerLines = append(headerLines, styles.Hint.Render("⬡ Bridge Offline — open Terraria with ForgeConnector loaded"))
 	}
 
 	if m.injectErr != "" {
-		lines = append(lines, styles.Error.Render("✘ "+m.injectErr))
+		headerLines = append(headerLines, styles.Error.Render("✘ "+m.injectErr))
 	}
 
-	if m.injecting {
-		lines = append(lines, "", styles.Injecting.Render("⟳ Injecting into Terraria..."))
-	} else {
-		lines = append(lines, "", styles.Hint.Render("[C] Craft Another   [ENTER] Execute"))
+	switch {
+	case m.injecting:
+		headerLines = append(headerLines, "", styles.Injecting.Render("⟳ Waiting for Terraria..."))
+	case m.injectStatus == "reload_triggered":
+		headerLines = append(headerLines, "", styles.Success.Render("✔ Mod reloading in Terraria"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
+	case m.injectStatus == "reload_failed":
+		headerLines = append(headerLines, "", styles.Error.Render("✘ Connector reached but reload failed"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
+	case m.injectStatus == "timeout":
+		headerLines = append(headerLines, "", styles.Error.Render("✘ No response from Terraria"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
+	default:
+		headerLines = append(headerLines, "", styles.Hint.Render("[C] Craft Another   [ENTER] Execute"))
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(headerLines, "\n")
 }
 
 func (m *model) configureWizardStep() {
@@ -772,8 +883,11 @@ func (m *model) resetForCraftAnother() {
 	m.stageLabel = ""
 	m.stageTargetPct = 0
 	m.craftingStation = ""
+	m.forgeManifest = nil
+	m.forgeSprPath = ""
 	m.bridgeAlive = false
 	m.injectErr = ""
+	m.injectStatus = ""
 	m.textInput.SetValue("")
 	m.textInput.Focus()
 	m.modeList.Select(0)
@@ -790,6 +904,29 @@ func (m model) buildCraftedItem() craftedItem {
 	} else if m.tier != "" {
 		label = fmt.Sprintf("%s (%s)", name, m.tier)
 	}
+
+	// Extract stats from manifest
+	var stats itemStats
+	if m.forgeManifest != nil {
+		if statsMap, ok := m.forgeManifest["stats"].(map[string]interface{}); ok {
+			if v, ok := statsMap["damage"].(float64); ok {
+				stats.Damage = int(v)
+			}
+			if v, ok := statsMap["knockback"].(float64); ok {
+				stats.Knockback = v
+			}
+			if v, ok := statsMap["crit_chance"].(float64); ok {
+				stats.CritChance = int(v)
+			}
+			if v, ok := statsMap["use_time"].(float64); ok {
+				stats.UseTime = int(v)
+			}
+			if v, ok := statsMap["rarity"].(string); ok {
+				stats.Rarity = v
+			}
+		}
+	}
+
 	return craftedItem{
 		label:           label,
 		tier:            m.tier,
@@ -797,6 +934,8 @@ func (m model) buildCraftedItem() craftedItem {
 		styleChoice:     m.styleChoice,
 		projectile:      m.projectile,
 		craftingStation: m.craftingStation,
+		stats:           stats,
+		spritePath:      m.forgeSprPath,
 	}
 }
 
@@ -815,6 +954,190 @@ func buildMetaLine(item craftedItem) string {
 		return ""
 	}
 	return strings.Join(parts, " · ")
+}
+
+// ---------------------------------------------------------------------------
+// Sprite ASCII-art renderer
+// ---------------------------------------------------------------------------
+
+func colorToHex(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
+func isTransparent(c color.Color) bool {
+	_, _, _, a := c.RGBA()
+	return a < 0x8000
+}
+
+// renderSprite reads a PNG file and renders it as colored half-block (▀)
+// characters. Each character encodes two vertical pixels: top pixel as
+// foreground, bottom pixel as background. Transparent pixels use the
+// terminal default. Sprites are typically 32×32 or 64×64.
+func renderSprite(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return ""
+	}
+
+	bounds := img.Bounds()
+	w := bounds.Max.X - bounds.Min.X
+	h := bounds.Max.Y - bounds.Min.Y
+
+	// Find the bounding box of non-transparent pixels to crop whitespace.
+	minX, minY, maxX, maxY := w, h, 0, 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if !isTransparent(img.At(x, y)) {
+				if x < minX {
+					minX = x
+				}
+				if y < minY {
+					minY = y
+				}
+				if x > maxX {
+					maxX = x
+				}
+				if y > maxY {
+					maxY = y
+				}
+			}
+		}
+	}
+
+	if maxX < minX || maxY < minY {
+		return "" // fully transparent
+	}
+
+	// Crop to bounding box.
+	cropW := maxX - minX + 1
+	cropH := maxY - minY + 1
+
+	// Scale down if the sprite is too large for the terminal.
+	// Target max ~20 columns wide, ~16 rows tall (32 pixel rows at 2px/char).
+	scale := 1
+	if cropW > 40 {
+		s := int(math.Ceil(float64(cropW) / 40.0))
+		if s > scale {
+			scale = s
+		}
+	}
+	if cropH > 32 {
+		s := int(math.Ceil(float64(cropH) / 32.0))
+		if s > scale {
+			scale = s
+		}
+	}
+
+	outW := cropW / scale
+	outH := cropH / scale
+	if outW == 0 {
+		outW = 1
+	}
+	if outH == 0 {
+		outH = 1
+	}
+
+	// Sample pixels with scaling.
+	pixel := func(px, py int) color.Color {
+		sx := minX + px*scale
+		sy := minY + py*scale
+		if sx >= bounds.Max.X || sy >= bounds.Max.Y {
+			return color.Transparent
+		}
+		return img.At(sx, sy)
+	}
+
+	// Render using half-block technique: ▀ with top=fg, bottom=bg.
+	var lines []string
+	for row := 0; row < outH; row += 2 {
+		var lineChars []string
+		for col := 0; col < outW; col++ {
+			top := pixel(col, row)
+			var bottom color.Color = color.Transparent
+			if row+1 < outH {
+				bottom = pixel(col, row+1)
+			}
+
+			topTrans := isTransparent(top)
+			botTrans := isTransparent(bottom)
+
+			switch {
+			case topTrans && botTrans:
+				lineChars = append(lineChars, " ")
+			case topTrans:
+				// Only bottom pixel visible — use lower half block ▄
+				s := lipgloss.NewStyle().Foreground(lipgloss.Color(colorToHex(bottom)))
+				lineChars = append(lineChars, s.Render("▄"))
+			case botTrans:
+				// Only top pixel visible — use upper half block ▀
+				s := lipgloss.NewStyle().Foreground(lipgloss.Color(colorToHex(top)))
+				lineChars = append(lineChars, s.Render("▀"))
+			default:
+				// Both pixels visible — ▀ with top as fg, bottom as bg
+				s := lipgloss.NewStyle().
+					Foreground(lipgloss.Color(colorToHex(top))).
+					Background(lipgloss.Color(colorToHex(bottom)))
+				lineChars = append(lineChars, s.Render("▀"))
+			}
+		}
+		lines = append(lines, strings.Join(lineChars, ""))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// Stats panel renderer
+// ---------------------------------------------------------------------------
+
+func friendlyRarity(raw string) string {
+	// Convert "ItemRarityID.White" → "White"
+	if i := strings.LastIndex(raw, "."); i >= 0 && i+1 < len(raw) {
+		return raw[i+1:]
+	}
+	if raw == "" {
+		return "—"
+	}
+	return raw
+}
+
+func renderStats(stats itemStats) string {
+	if stats.Damage == 0 && stats.UseTime == 0 {
+		return "" // no stats available
+	}
+
+	labelStyle := styles.StatsLabel
+	valStyle := styles.StatsValue
+
+	row := func(icon, label, value string) string {
+		return fmt.Sprintf("%s %s %s",
+			labelStyle.Render(icon),
+			labelStyle.Render(fmt.Sprintf("%-10s", label)),
+			valStyle.Render(value),
+		)
+	}
+
+	lines := []string{
+		styles.StatsTitle.Render("Stats"),
+		"",
+		row("⚔", "Damage", fmt.Sprintf("%d", stats.Damage)),
+		row("◈", "Knockback", fmt.Sprintf("%.1f", stats.Knockback)),
+		row("◎", "Crit", fmt.Sprintf("%d%%", stats.CritChance)),
+		row("⏱", "Use Time", fmt.Sprintf("%d", stats.UseTime)),
+		row("★", "Rarity", friendlyRarity(stats.Rarity)),
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderShell(content string) string {
@@ -895,9 +1218,11 @@ func findOrchestratorPath() string {
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "..", "agents", "orchestrator.py"))
 	}
+	if envPath := os.Getenv("FORGE_ORCHESTRATOR_PATH"); envPath != "" {
+		candidates = append(candidates, envPath)
+	}
 	candidates = append(candidates,
 		filepath.Join("..", "agents", "orchestrator.py"),
-		"/Users/user/terraria/agents/orchestrator.py",
 	)
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {

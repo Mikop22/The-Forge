@@ -207,7 +207,7 @@ def _describe_shape_with_colors(ref_url: str, color_palette: str) -> str:
         data = resp.read()
     b64 = base64.b64encode(data).decode("ascii")
 
-    llm = ChatOpenAI(model="gpt-4o")
+    llm = ChatOpenAI(model="gpt-4o", timeout=60)
     messages = [
         SystemMessage(content=(
             "This reference image shows a weapon we want to turn into a single pixel art sprite. "

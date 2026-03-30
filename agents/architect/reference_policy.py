@@ -108,7 +108,7 @@ class HybridReferenceApprover:
     model_name: str = "gpt-5.4"
 
     def __post_init__(self) -> None:
-        self._llm = ChatOpenAI(model=self.model_name).with_structured_output(
+        self._llm = ChatOpenAI(model=self.model_name, timeout=60).with_structured_output(
             ReferenceApprovalOutput
         )
 

@@ -73,7 +73,7 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
             if (Main.rand.NextBool(3))
             {
                 Dust.NewDust(new Vector2(hitbox.X, hitbox.Y), hitbox.Width, hitbox.Height,
-                    DustID.Torch, Projectile.velocity.X * 0.5f, Projectile.velocity.Y * 0.5f);
+                    DustID.Torch, player.velocity.X * 0.2f, player.velocity.Y * 0.2f);
             }
         }
 

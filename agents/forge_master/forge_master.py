@@ -43,7 +43,7 @@ class CoderAgent:
 
     def __init__(self, model_name: str = "gpt-5.4") -> None:
         # GPT-5 Nano does not support the temperature parameter.
-        self._llm = ChatOpenAI(model=model_name)
+        self._llm = ChatOpenAI(model=model_name, timeout=120)
 
         # Code generation: prompt → LLM → structured Pydantic output
         self._gen_chain = (

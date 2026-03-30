@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+try:
+    from utils import to_pascal_case as _to_pascal_case
+except ImportError:
+    from pathlib import Path as _Path
+    _parent = str(_Path(__file__).resolve().parent.parent)
+    if _parent not in sys.path:
+        sys.path.insert(0, _parent)
+    from utils import to_pascal_case as _to_pascal_case
 
 
 # ---------------------------------------------------------------------------
@@ -67,9 +77,7 @@ class PixelsmithInput(BaseModel):
     @field_validator("item_name", mode="before")
     @classmethod
     def sanitize_item_name(cls, v: str) -> str:
-        cleaned = re.sub(r"[^a-zA-Z0-9]", " ", str(v))
-        cleaned = re.sub(r"([a-z])([A-Z])", r"\1 \2", cleaned)
-        return "".join(word.capitalize() for word in cleaned.split())
+        return _to_pascal_case(str(v))
 
 
 # ---------------------------------------------------------------------------

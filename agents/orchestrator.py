@@ -86,12 +86,14 @@ def _set_stage(label: str, pct: int) -> None:
     _write_status({"status": "building", "stage_label": label, "stage_pct": pct})
 
 
-def _set_ready(item_name: str) -> None:
+def _set_ready(item_name: str, manifest: dict | None = None, sprite_path: str = "") -> None:
     _write_status({
         "status": "ready",
         "stage_pct": 100,
         "batch_list": [item_name],
         "message": "Compilation successful. Waiting for user...",
+        "manifest": manifest or {},
+        "sprite_path": sprite_path,
     })
 
 
@@ -193,7 +195,11 @@ async def run_pipeline(request: dict[str, Any]) -> None:
         )
 
     # --- Step E: signal success ----------------------------------------
-    _set_ready(gate_result.get("item_name", item_name))
+    _set_ready(
+        gate_result.get("item_name", item_name),
+        manifest=manifest,
+        sprite_path=str(art_result.get("item_sprite_path", "")),
+    )
     log.info("★ Pipeline complete for %s", item_name)
 
 

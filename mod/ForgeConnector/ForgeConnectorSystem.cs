@@ -22,6 +22,7 @@ namespace ForgeConnector
         private string _modSourcesDir = string.Empty;
         private string _triggerPath = string.Empty;
         private string _heartbeatPath = string.Empty;
+        private string _statusPath = string.Empty;
 
         // ------------------------------------------------------------------
         // Lifecycle
@@ -32,6 +33,7 @@ namespace ForgeConnector
             _modSourcesDir = GetModSourcesDir();
             _triggerPath   = Path.Combine(_modSourcesDir, "command_trigger.json");
             _heartbeatPath = Path.Combine(_modSourcesDir, "forge_connector_alive.json");
+            _statusPath    = Path.Combine(_modSourcesDir, "forge_connector_status.json");
 
             WriteHeartbeat();
             StartWatcher();
@@ -53,7 +55,8 @@ namespace ForgeConnector
         {
             if (Interlocked.Exchange(ref _reloadRequested, 0) == 1)
             {
-                TriggerReload();
+                bool triggered = TriggerReload();
+                WriteStatus(triggered ? "reload_triggered" : "reload_failed");
             }
         }
 
@@ -106,7 +109,7 @@ namespace ForgeConnector
         // Reload trigger (called from main thread only)
         // ------------------------------------------------------------------
 
-        private static void TriggerReload()
+        private static bool TriggerReload()
         {
             // Strategy 1: Public menu-path reload (preferred, no reflection).
             // The reloadModsID field lives in different namespaces across tML versions;
@@ -127,7 +130,7 @@ namespace ForgeConnector
                     {
                         int reloadId = (int)field.GetValue(null)!;
                         Main.menuMode = reloadId;
-                        return;
+                        return true;
                     }
                 }
             }
@@ -136,11 +139,38 @@ namespace ForgeConnector
             // Strategy 2: Reflection into ModLoader.Reload() (non-public static).
             try
             {
-                typeof(ModLoader)
-                    .GetMethod("Reload", BindingFlags.Static | BindingFlags.NonPublic)
-                    ?.Invoke(null, null);
+                var reloadMethod = typeof(ModLoader)
+                    .GetMethod("Reload", BindingFlags.Static | BindingFlags.NonPublic);
+                if (reloadMethod == null)
+                    return false;
+
+                reloadMethod.Invoke(null, null);
+                return true;
             }
             catch { /* nothing we can do */ }
+
+            return false;
+        }
+
+        // ------------------------------------------------------------------
+        // Status writer — signals the TUI about reload outcome
+        // ------------------------------------------------------------------
+
+        private void WriteStatus(string status)
+        {
+            try
+            {
+                var payload = new
+                {
+                    status,
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                };
+                string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+                string tmp = _statusPath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, _statusPath, overwrite: true);
+            }
+            catch { /* best-effort */ }
         }
 
         // ------------------------------------------------------------------

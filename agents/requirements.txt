@@ -5,12 +5,9 @@ python-dotenv
 watchdog>=3.0
 
 # Pixelsmith (art generation)
-torch>=2.0
-diffusers>=0.25
-transformers>=4.36,<5.0
-accelerate
-rembg
 Pillow>=10.0
-opencv-python-headless
-safetensors
 numpy
+scikit-learn
+
+# Reference finder (browser-based image search)
+playwright

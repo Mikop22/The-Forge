@@ -73,7 +73,7 @@ def select_best_variant(
         content.append({"type": "text", "text": f"Candidate {i}:"})
         content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"}})
 
-    llm = ChatOpenAI(model=model)
+    llm = ChatOpenAI(model=model, timeout=60)
     messages = [
         SystemMessage(content=_SELECTOR_SYSTEM.format(n=n)),
         HumanMessage(content=content),
