@@ -60,20 +60,5 @@ namespace ForgeConnector
             return false;
         }
 
-        // -----------------------------------------------------------
-        // On-hit effects
-        // -----------------------------------------------------------
-
-        public override void OnHitNPC(Projectile projectile, NPC target, NPC.HitInfo hit, int damageDone)
-        {
-            if (projectile.ModProjectile is not ForgeTemplateProjectile template)
-                return;
-
-            var data = ForgeManifestStore.GetProjectile(template.SlotIndex);
-            if (data == null)
-                return;
-
-            // Projectile on-hit effects can be extended here if the manifest supports them
-        }
     }
 }

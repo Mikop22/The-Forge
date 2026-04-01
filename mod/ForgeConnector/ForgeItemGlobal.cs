@@ -4,7 +4,6 @@ using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
-using Terraria.UI.Chat;
 using ForgeConnector.Content.Items;
 
 namespace ForgeConnector

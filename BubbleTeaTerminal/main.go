@@ -310,6 +310,32 @@ func writeCommandTrigger() error {
 	return os.Rename(tmp, dst)
 }
 
+// writeInjectFile writes forge_inject.json from the TUI's stored manifest data.
+func writeInjectFile(manifest map[string]interface{}, itemName, spritePath string) error {
+	dir := modSourcesDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"action":                 "inject",
+		"item_name":             itemName,
+		"manifest":              manifest,
+		"sprite_path":           spritePath,
+		"projectile_sprite_path": "",
+		"timestamp":             time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	dst := filepath.Join(dir, "forge_inject.json")
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
 // readHeartbeatFile returns true if the JSON heartbeat file exists,
 // has status "listening", and its PID is still alive.
 func readHeartbeatFile(path string) bool {
@@ -647,9 +673,15 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.injectErr = ""
 			m.injectStatus = ""
 			if m.injectMode {
-				// Instant inject: forge_inject.json was already written by the orchestrator.
-				// Just clear stale status and start polling for connector response.
-				_ = os.Remove(filepath.Join(modSourcesDir(), "forge_connector_status.json"))
+				// Write forge_inject.json fresh from stored manifest data.
+				// The orchestrator's copy may have been consumed by a prior attempt.
+				dir := modSourcesDir()
+				_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
+				if err := writeInjectFile(m.forgeManifest, m.forgeItemName, m.forgeSprPath); err != nil {
+					m.injecting = false
+					m.injectErr = err.Error()
+					return m, nil
+				}
 				return m, pollConnectorStatusCmd(0)
 			}
 			// Legacy: trigger mod reload via command_trigger.json.

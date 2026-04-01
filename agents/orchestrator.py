@@ -271,7 +271,7 @@ async def run_instant_pipeline(request: dict[str, Any]) -> None:
         "item_name": item_name,
         "manifest": manifest,
         "sprite_path": str(art_result.get("item_sprite_path", "")),
-        "projectile_sprite_path": str(art_result.get("projectile_sprite_path", "")),
+        "projectile_sprite_path": art_result.get("projectile_sprite_path") or "",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 

@@ -33,9 +33,7 @@ namespace ForgeConnector
         private string _heartbeatPath = string.Empty;
         private string _statusPath = string.Empty;
 
-        // Mapping from slot index → tModLoader type IDs (populated once at load)
-        private static readonly Dictionary<int, int> _slotToItemType = new();
-        private static readonly Dictionary<int, int> _slotToProjectileType = new();
+        // (Type ID mappings stored in ForgeManifestStore)
 
         // ------------------------------------------------------------------
         // Lifecycle
@@ -58,8 +56,6 @@ namespace ForgeConnector
         {
             _watcher?.Dispose();
             _watcher = null;
-            _slotToItemType.Clear();
-            _slotToProjectileType.Clear();
             ForgeManifestStore.Clear();
 
             try { File.Delete(_heartbeatPath); } catch { /* best-effort */ }
@@ -86,15 +82,14 @@ namespace ForgeConnector
                 typeof(ForgeItem_046), typeof(ForgeItem_047), typeof(ForgeItem_048), typeof(ForgeItem_049), typeof(ForgeItem_050),
             };
 
+            // Hoist reflection lookup outside loop
+            var itemTypeMethod = typeof(ModContent).GetMethod("ItemType", Type.EmptyTypes);
             for (int i = 0; i < itemTypes.Length; i++)
             {
-                // ModContent.ItemType<T>() via reflection since we can't use generics with a runtime Type
-                var method = typeof(ModContent).GetMethod("ItemType", Type.EmptyTypes);
-                var generic = method?.MakeGenericMethod(itemTypes[i]);
+                var generic = itemTypeMethod?.MakeGenericMethod(itemTypes[i]);
                 if (generic != null)
                 {
                     int typeId = (int)generic.Invoke(null, null)!;
-                    _slotToItemType[i] = typeId;
                     ForgeManifestStore.RegisterItemTypeId(i, typeId);
                 }
             }
@@ -109,14 +104,13 @@ namespace ForgeConnector
                 typeof(ForgeProjectile_021), typeof(ForgeProjectile_022), typeof(ForgeProjectile_023), typeof(ForgeProjectile_024), typeof(ForgeProjectile_025),
             };
 
+            var projTypeMethod = typeof(ModContent).GetMethod("ProjectileType", Type.EmptyTypes);
             for (int i = 0; i < projTypes.Length; i++)
             {
-                var method = typeof(ModContent).GetMethod("ProjectileType", Type.EmptyTypes);
-                var generic = method?.MakeGenericMethod(projTypes[i]);
+                var generic = projTypeMethod?.MakeGenericMethod(projTypes[i]);
                 if (generic != null)
                 {
                     int typeId = (int)generic.Invoke(null, null)!;
-                    _slotToProjectileType[i] = typeId;
                     ForgeManifestStore.RegisterProjectileTypeId(i, typeId);
                 }
             }
@@ -154,13 +148,18 @@ namespace ForgeConnector
         {
             try
             {
+                Mod.Logger.Info("[ForgeConnector] ProcessInject starting, json length=" + json.Length);
                 using JsonDocument doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
                 if (!root.TryGetProperty("action", out var actionEl) || actionEl.GetString() != "inject")
+                {
+                    Mod.Logger.Warn("[ForgeConnector] ProcessInject: no 'inject' action found");
                     return;
+                }
 
                 string itemName = root.TryGetProperty("item_name", out var nameEl) ? nameEl.GetString() ?? "" : "";
+                Mod.Logger.Info("[ForgeConnector] Injecting item: " + itemName);
 
                 // Parse manifest into ForgeItemData
                 var data = ParseManifest(root);
@@ -180,36 +179,45 @@ namespace ForgeConnector
                 }
 
                 // Handle projectile if specified
-                int projSlot = -1;
-                if (data.ShootProjectileSlot >= 0 || root.TryGetProperty("projectile_sprite_path", out var projSpriteEl))
+                bool hasProjectile = data.ShootProjectileSlot >= 0;
+                string projSpritePath = "";
+                if (root.TryGetProperty("projectile_sprite_path", out var projSpriteEl)
+                    && projSpriteEl.ValueKind == JsonValueKind.String)
                 {
-                    projSlot = ForgeManifestStore.NextProjectileSlot();
+                    projSpritePath = projSpriteEl.GetString() ?? "";
+                    if (projSpritePath == "None" || projSpritePath == "null")
+                        projSpritePath = "";
+                    if (!string.IsNullOrEmpty(projSpritePath) && File.Exists(projSpritePath))
+                        hasProjectile = true;
+                }
+
+                if (hasProjectile)
+                {
+                    int projSlot = ForgeManifestStore.NextProjectileSlot();
                     var projData = ParseProjectile(root);
                     ForgeManifestStore.RegisterProjectile(projSlot, projData);
                     data.ShootProjectileSlot = projSlot;
-                    ForgeManifestStore.RegisterItem(slot, data); // update with projectile slot
+                    ForgeManifestStore.RegisterItem(slot, data);
 
-                    if (root.TryGetProperty("projectile_sprite_path", out var pspEl))
-                    {
-                        string pspPath = pspEl.GetString() ?? "";
-                        if (File.Exists(pspPath))
-                        {
-                            LoadProjectileTexture(projSlot, pspPath);
-                        }
-                    }
+                    if (!string.IsNullOrEmpty(projSpritePath) && File.Exists(projSpritePath))
+                        LoadProjectileTexture(projSlot, projSpritePath);
                 }
 
                 // Spawn the item into the player's inventory
                 int itemTypeId = ForgeManifestStore.GetItemTypeId(slot);
+                Mod.Logger.Info($"[ForgeConnector] Slot={slot}, TypeId={itemTypeId}, LocalPlayer null={Main.LocalPlayer == null}");
                 if (itemTypeId > 0 && Main.LocalPlayer != null)
                 {
                     Main.LocalPlayer.QuickSpawnItem(Main.LocalPlayer.GetSource_Misc("ForgeConnector"), itemTypeId);
+                    Mod.Logger.Info("[ForgeConnector] Item spawned successfully");
                 }
 
                 WriteStatus("item_injected", itemName, slot);
+                Mod.Logger.Info("[ForgeConnector] Status written: item_injected");
             }
             catch (Exception ex)
             {
+                Mod.Logger.Error("[ForgeConnector] ProcessInject failed: " + ex);
                 WriteStatus("inject_failed", ex.Message, -1);
             }
         }
@@ -231,14 +239,16 @@ namespace ForgeConnector
                     data.Knockback = GetFloat(stats, "knockback", 4f);
                     data.CritChance = GetInt(stats, "crit_chance", 4);
                     data.UseTime = GetInt(stats, "use_time", 20);
-                    data.UseAnimation = GetInt(stats, "use_time", 20); // same as use_time by default
+                    data.UseAnimation = GetInt(stats, "use_animation", data.UseTime);
                     data.AutoReuse = GetBool(stats, "auto_reuse", true);
                     data.Rarity = ParseRarity(GetStr(stats, "rarity", "ItemRarityID.White"));
                 }
 
                 if (manifest.TryGetProperty("visuals", out var visuals))
                 {
-                    if (visuals.TryGetProperty("icon_size", out var iconSize) && iconSize.GetArrayLength() >= 2)
+                    if (visuals.TryGetProperty("icon_size", out var iconSize)
+                        && iconSize.ValueKind == JsonValueKind.Array
+                        && iconSize.GetArrayLength() >= 2)
                     {
                         data.Width = iconSize[0].GetInt32();
                         data.Height = iconSize[1].GetInt32();
@@ -279,9 +289,12 @@ namespace ForgeConnector
 
             if (root.TryGetProperty("manifest", out var manifest))
             {
-                if (manifest.TryGetProperty("projectile_visuals", out var pv))
+                if (manifest.TryGetProperty("projectile_visuals", out var pv)
+                    && pv.ValueKind == JsonValueKind.Object)
                 {
-                    if (pv.TryGetProperty("icon_size", out var iconSize) && iconSize.GetArrayLength() >= 2)
+                    if (pv.TryGetProperty("icon_size", out var iconSize)
+                        && iconSize.ValueKind == JsonValueKind.Array
+                        && iconSize.GetArrayLength() >= 2)
                     {
                         data.Width = iconSize[0].GetInt32();
                         data.Height = iconSize[1].GetInt32();
@@ -371,6 +384,7 @@ namespace ForgeConnector
             try
             {
                 string json = File.ReadAllText(_injectPath);
+                Mod.Logger.Info("[ForgeConnector] HandleInjectTrigger: read " + json.Length + " bytes");
 
                 // Delete immediately to prevent double-fire
                 try { File.Delete(_injectPath); } catch { }
@@ -516,9 +530,10 @@ namespace ForgeConnector
             el.TryGetProperty(prop, out var v) && v.TryGetInt32(out int i) ? i : def;
 
         private static float GetFloat(JsonElement el, string prop, float def = 0f) =>
-            el.TryGetProperty(prop, out var v) ? (float)v.GetDouble() : def;
+            el.TryGetProperty(prop, out var v) && v.TryGetDouble(out double d) ? (float)d : def;
 
         private static bool GetBool(JsonElement el, string prop, bool def = false) =>
-            el.TryGetProperty(prop, out var v) ? v.GetBoolean() : def;
+            el.TryGetProperty(prop, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? v.GetBoolean() : def;
     }
 }

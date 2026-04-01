@@ -113,8 +113,17 @@ namespace ForgeConnector
         public static void RegisterItem(int slot, ForgeItemData data) => _items[slot] = data;
         public static void RegisterProjectile(int slot, ForgeProjectileData data) => _projectiles[slot] = data;
 
-        public static void SetItemTexture(int slot, Texture2D tex) => _itemTextures[slot] = tex;
-        public static void SetProjectileTexture(int slot, Texture2D tex) => _projectileTextures[slot] = tex;
+        public static void SetItemTexture(int slot, Texture2D tex)
+        {
+            if (_itemTextures.TryGetValue(slot, out var old)) old?.Dispose();
+            _itemTextures[slot] = tex;
+        }
+
+        public static void SetProjectileTexture(int slot, Texture2D tex)
+        {
+            if (_projectileTextures.TryGetValue(slot, out var old)) old?.Dispose();
+            _projectileTextures[slot] = tex;
+        }
 
         public static void RegisterItemTypeId(int slot, int typeId) => _itemTypeIds[slot] = typeId;
         public static void RegisterProjectileTypeId(int slot, int typeId) => _projectileTypeIds[slot] = typeId;
@@ -132,6 +141,8 @@ namespace ForgeConnector
 
         public static void Clear()
         {
+            foreach (var tex in _itemTextures.Values) tex?.Dispose();
+            foreach (var tex in _projectileTextures.Values) tex?.Dispose();
             _items.Clear();
             _projectiles.Clear();
             _itemTextures.Clear();
