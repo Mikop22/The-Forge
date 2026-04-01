@@ -62,7 +62,7 @@ type craftedItem struct {
 	label           string
 	tier            string
 	damageClass     string
-	styleChoice     string
+	weaponType     string
 	projectile      string
 	craftingStation string
 	stats           itemStats
@@ -153,7 +153,7 @@ type model struct {
 	prompt          string
 	tier            string
 	damageClass     string
-	styleChoice     string
+	weaponType     string
 	projectile      string
 	craftingStation string
 
@@ -479,7 +479,7 @@ func (m model) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.wizardIndex = 0
 				m.tier = ""
 				m.damageClass = ""
-				m.styleChoice = ""
+				m.weaponType = ""
 				m.projectile = ""
 				m.configureWizardStep()
 				m.state = screenWizard
@@ -487,7 +487,7 @@ func (m model) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.tier = "Auto"
 			m.damageClass = ""
-			m.styleChoice = ""
+			m.weaponType = ""
 			m.projectile = ""
 			return m.enterForge()
 		}
@@ -513,7 +513,7 @@ func (m model) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 1:
 				m.damageClass = ""
 			case 2:
-				m.styleChoice = ""
+				m.weaponType = ""
 			case 3:
 				m.craftingStation = ""
 			}
@@ -527,7 +527,7 @@ func (m model) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 1:
 				m.damageClass = selected.title
 			case 2:
-				m.styleChoice = selected.title
+				m.weaponType = selected.title
 			case 3:
 				m.craftingStation = selected.title
 			}
@@ -765,7 +765,7 @@ func (m model) stagingView() string {
 
 		// Item name
 		headerLines = append(headerLines, styles.Inventory.Render(m.revealItem(latest.label)))
-		if m.revealPhase >= 3 && (latest.damageClass != "" || latest.styleChoice != "" || latest.projectile != "") {
+		if m.revealPhase >= 3 && (latest.damageClass != "" || latest.weaponType != "" || latest.projectile != "") {
 			meta := buildMetaLine(latest)
 			if meta != "" {
 				headerLines = append(headerLines, styles.Meta.Render(meta))
@@ -875,7 +875,7 @@ func (m model) enterForge() (tea.Model, tea.Cmd) {
 
 	prompt := m.prompt
 	tier := m.tier
-	subType := m.styleChoice
+	subType := m.weaponType
 	craftingStation := m.craftingStation
 	startCmd := func() tea.Msg {
 		// Clear any stale status from a previous run.
@@ -899,7 +899,7 @@ func (m *model) resetForCraftAnother() {
 	m.prompt = ""
 	m.tier = ""
 	m.damageClass = ""
-	m.styleChoice = ""
+	m.weaponType = ""
 	m.projectile = ""
 	m.wizardIndex = 0
 	m.errMsg = ""
@@ -959,7 +959,7 @@ func (m model) buildCraftedItem() craftedItem {
 		label:           label,
 		tier:            m.tier,
 		damageClass:     m.damageClass,
-		styleChoice:     m.styleChoice,
+		weaponType:     m.weaponType,
 		projectile:      m.projectile,
 		craftingStation: m.craftingStation,
 		stats:           stats,
@@ -972,8 +972,8 @@ func buildMetaLine(item craftedItem) string {
 	if item.damageClass != "" {
 		parts = append(parts, item.damageClass)
 	}
-	if item.styleChoice != "" {
-		parts = append(parts, item.styleChoice)
+	if item.weaponType != "" {
+		parts = append(parts, item.weaponType)
 	}
 	if item.projectile != "" && item.projectile != "None" {
 		parts = append(parts, item.projectile)
@@ -1198,7 +1198,7 @@ func (m model) emberStrip() string {
 
 func (m model) sigilColumn() string {
 	slots := []string{"Tier", "Class", "Weapon", "Forge"}
-	values := []string{m.tier, m.damageClass, m.styleChoice, m.craftingStation}
+	values := []string{m.tier, m.damageClass, m.weaponType, m.craftingStation}
 	lines := []string{styles.Meta.Render("Sigils")}
 	for i := range slots {
 		mark := "○"
