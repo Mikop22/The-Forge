@@ -86,14 +86,16 @@ def _set_stage(label: str, pct: int) -> None:
     _write_status({"status": "building", "stage_label": label, "stage_pct": pct})
 
 
-def _set_ready(item_name: str, manifest: dict | None = None, sprite_path: str = "") -> None:
+def _set_ready(item_name: str, manifest: dict | None = None, sprite_path: str = "",
+               inject_mode: bool = False) -> None:
     _write_status({
         "status": "ready",
         "stage_pct": 100,
         "batch_list": [item_name],
-        "message": "Compilation successful. Waiting for user...",
+        "message": "Ready for injection." if inject_mode else "Compilation successful. Waiting for user...",
         "manifest": manifest or {},
         "sprite_path": sprite_path,
+        "inject_mode": inject_mode,
     })
 
 
@@ -122,6 +124,16 @@ def _import_agents():
     return ArchitectAgent, CoderAgent, ArtistAgent, Integrator
 
 
+def _import_instant_agents():
+    """Lazily import only the agents needed for the instant inject path."""
+    sys.path.insert(0, str(_AGENTS_ROOT))
+
+    from architect.architect import ArchitectAgent
+    from pixelsmith.pixelsmith import ArtistAgent
+
+    return ArchitectAgent, ArtistAgent
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -133,6 +145,7 @@ async def run_pipeline(request: dict[str, Any]) -> None:
 
     prompt: str = request.get("prompt", "")
     tier: str = request.get("tier", "Tier1_Starter")
+    sub_type: str | None = request.get("sub_type")
     crafting_station: str | None = request.get("crafting_station")
 
     if not prompt:
@@ -145,7 +158,9 @@ async def run_pipeline(request: dict[str, Any]) -> None:
     log.info("▸ Architect — generating manifest for: %s", prompt[:80])
     _set_stage("Architect — Designing item...", 15)
     architect = ArchitectAgent()
-    manifest: dict = architect.generate_manifest(prompt=prompt, tier=tier, crafting_station=crafting_station)
+    manifest: dict = architect.generate_manifest(
+        prompt=prompt, tier=tier, sub_type=sub_type, crafting_station=crafting_station,
+    )
     item_name: str = manifest["item_name"]
     log.info("✓ Architect complete — item: %s", item_name)
 
@@ -201,6 +216,63 @@ async def run_pipeline(request: dict[str, Any]) -> None:
         sprite_path=str(art_result.get("item_sprite_path", "")),
     )
     log.info("★ Pipeline complete for %s", item_name)
+
+
+# ---------------------------------------------------------------------------
+# Instant Inject Pipeline (Architect → Artist → forge_inject.json)
+# ---------------------------------------------------------------------------
+
+async def run_instant_pipeline(request: dict[str, Any]) -> None:
+    """Execute the instant inject DAG: Architect → Artist only.
+
+    Skips Coder and Gatekeeper entirely.  Instead of compiling a .tmod,
+    writes ``forge_inject.json`` for the ForgeConnector template pool
+    to pick up at runtime.
+    """
+    ArchitectAgent, ArtistAgent = _import_instant_agents()
+
+    prompt: str = request.get("prompt", "")
+    tier: str = request.get("tier", "Tier1_Starter")
+    crafting_station: str | None = request.get("crafting_station")
+
+    if not prompt:
+        raise ValueError("Request payload missing 'prompt' field.")
+
+    # --- Step A: signal the TUI ----------------------------------------
+    _set_stage("Kindling the Forge...", 5)
+
+    # --- Step B: Architect (sequential) --------------------------------
+    log.info("▸ Architect — generating manifest for: %s", prompt[:80])
+    _set_stage("Architect — Designing item...", 15)
+    architect = ArchitectAgent()
+    manifest: dict = architect.generate_manifest(prompt=prompt, tier=tier, crafting_station=crafting_station)
+    item_name: str = manifest["item_name"]
+    log.info("✓ Architect complete — item: %s", item_name)
+
+    # --- Step C: Artist (sequential — no Coder needed) -----------------
+    log.info("▸ Artist — generating sprite")
+    _set_stage("Pixelsmith — Forging sprite...", 40)
+
+    loop = asyncio.get_running_loop()
+    artist = ArtistAgent(output_dir=str(OUTPUT_DIR))
+    art_result = await loop.run_in_executor(None, artist.generate_asset, manifest)
+
+    if art_result.get("status") != "success":
+        err = art_result.get("error", {})
+        raise RuntimeError(
+            f"ArtistAgent failed [{err.get('code', '?')}]: {err.get('message', 'unknown')}"
+        )
+    log.info("✓ Artist complete")
+
+    # --- Step D: Signal success (TUI writes forge_inject.json on confirm) -
+    _set_stage("Preparing injection...", 80)
+    _set_ready(
+        item_name,
+        manifest=manifest,
+        sprite_path=str(art_result.get("item_sprite_path", "")),
+        inject_mode=True,
+    )
+    log.info("★ Instant pipeline complete for %s", item_name)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +334,13 @@ class _RequestHandler(FileSystemEventHandler):
         """Execute the pipeline with top-level error handling."""
         async with self._lock:  # serialise concurrent requests
             try:
-                await run_pipeline(request)
+                mode = request.get("mode", "compile")
+                if mode == "instant":
+                    log.info("Mode: instant inject (template pool)")
+                    await run_instant_pipeline(request)
+                else:
+                    log.info("Mode: full compile")
+                    await run_pipeline(request)
             except Exception as exc:
                 log.exception("Pipeline failed")
                 _set_error(str(exc))
