@@ -1,5 +1,7 @@
 import asyncio
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 import orchestrator
@@ -204,8 +206,11 @@ class OrchestratorRequestTests(unittest.IsolatedAsyncioTestCase):
 
         fake_architect = FakeArchitect()
 
-        with mock.patch.object(orchestrator, "_import_agents", return_value=(lambda: fake_architect, FakeCoder, FakeArtist, FakeIntegrator)):
-            await orchestrator.run_pipeline(request)
+        with TemporaryDirectory() as tmpdir:
+            status_file = Path(tmpdir) / "generation_status.json"
+            with mock.patch.object(orchestrator, "STATUS_FILE", status_file), \
+                 mock.patch.object(orchestrator, "_import_agents", return_value=(lambda: fake_architect, FakeCoder, FakeArtist, FakeIntegrator)):
+                await orchestrator.run_pipeline(request)
 
         self.assertEqual(fake_architect.calls[0]["content_type"], "Accessory")
         self.assertEqual(fake_architect.calls[0]["sub_type"], "Charm")
@@ -273,9 +278,12 @@ class OrchestratorRequestTests(unittest.IsolatedAsyncioTestCase):
             async def run_in_executor(self, executor, fn, manifest):
                 return fn(manifest)
 
-        with mock.patch.object(orchestrator, "_import_instant_agents", return_value=(lambda: fake_architect, CapturingArtist)), \
-             mock.patch.object(orchestrator.asyncio, "get_running_loop", return_value=FakeLoop()):
-            await orchestrator.run_instant_pipeline(request)
+        with TemporaryDirectory() as tmpdir:
+            status_file = Path(tmpdir) / "generation_status.json"
+            with mock.patch.object(orchestrator, "STATUS_FILE", status_file), \
+                 mock.patch.object(orchestrator, "_import_instant_agents", return_value=(lambda: fake_architect, CapturingArtist)), \
+                 mock.patch.object(orchestrator.asyncio, "get_running_loop", return_value=FakeLoop()):
+                await orchestrator.run_instant_pipeline(request)
 
         self.assertFalse(fake_architect.called)
         self.assertIn("instance", captured_artist)
