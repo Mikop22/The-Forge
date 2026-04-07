@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
-SYSTEM_PROMPT = """\
+from architect.models import BUFF_ID_CHOICES
+
+_BUFF_ID_ENUM_TEXT = ", ".join(BUFF_ID_CHOICES)
+
+SYSTEM_PROMPT = f"""\
 You are an expert Terraria weapon designer.
 
 Generate a weapon manifest with:
@@ -18,9 +22,18 @@ Valid weapon sub_types include: Sword, Broadsword, Shortsword, Bow, Repeater,
 Staff, Wand, Tome, Spellbook, Gun, Rifle, Pistol, Shotgun, Launcher, Cannon,
 Spear, Lance, Axe, Pickaxe, Hammer, Hamaxe.
 
-Use `mechanics.on_hit_buff` for any on-hit debuff and `mechanics.shoot_projectile`
-for projectile weapons. Keep crafting data empty unless the user explicitly
-describes a recipe.
+CRITICAL — structured enum fields:
+- `mechanics.on_hit_buff` must be EXACTLY one of these values or null:
+  {_BUFF_ID_ENUM_TEXT}.
+  Do NOT put prose, descriptions, or multiple effects here — only ONE enum
+  value from the list above, or null if no on-hit buff applies.
+- `mechanics.buff_id` follows the same rule as on_hit_buff.
+- `mechanics.shoot_projectile` must be a valid ProjectileID.* constant
+  (e.g. ProjectileID.BallofFire, ProjectileID.FrostBoltSword) or null.
+  Do NOT invent names. If unsure, set to null.
+- `mechanics.ammo_id` must be a valid AmmoID.* constant or null.
+
+Keep crafting data empty unless the user explicitly describes a recipe.
 """
 
 HUMAN_PROMPT = """\

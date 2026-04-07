@@ -115,6 +115,14 @@ go run .
 
 That's it. The TUI will auto-start the Python orchestrator in the background.
 
+### ModSources path (single source of truth)
+
+The TUI, Python orchestrator, Gatekeeper, and ForgeConnector all resolve the tModLoader **ModSources** folder in the same order: `FORGE_MOD_SOURCES_DIR` (if set), then `mod_sources_dir` in `~/.config/theforge/config.toml`, then the default OS path. Set `FORGE_MOD_SOURCES_DIR` when you need the game and the terminal to agree without editing config (the C# bridge reads the env var; it does not read `config.toml`).
+
+If you see stderr warnings about mismatched paths at startup, align the env var and config file, restart the TUI, and reload the mod in tModLoader.
+
+Only one orchestrator should run per ModSources tree; a second instance exits with a clear message and leaves a lock file at `ModSources/.forge_orchestrator.lock`.
+
 ### Using the TUI
 
 1. **Type your weapon idea** and press Enter

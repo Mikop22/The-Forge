@@ -27,6 +27,9 @@ load_dotenv(Path(__file__).parent / ".env")
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from atomic_io import atomic_write_text as _atomic_write_text
+from paths import mod_sources_root
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -42,11 +45,11 @@ log = logging.getLogger("orchestrator")
 # Paths — all relative to the tModLoader ModSources directory
 # ---------------------------------------------------------------------------
 
-_HOME = Path.home()
-_MOD_SOURCES = _HOME / "Library" / "Application Support" / "Terraria" / "tModLoader" / "ModSources"
+_MOD_SOURCES = mod_sources_root()
 REQUEST_FILE = _MOD_SOURCES / "user_request.json"
 STATUS_FILE = _MOD_SOURCES / "generation_status.json"
 HEARTBEAT_FILE = _MOD_SOURCES / "orchestrator_alive.json"
+ORCHESTRATOR_LOCK_FILE = _MOD_SOURCES / ".forge_orchestrator.lock"
 
 # Where Pixelsmith drops sprites and Forge Master drops code
 _AGENTS_ROOT = Path(__file__).resolve().parent
@@ -57,22 +60,28 @@ OUTPUT_DIR = _AGENTS_ROOT / "output"
 # ---------------------------------------------------------------------------
 
 def _write_status(payload: dict) -> None:
-    """Atomically write *payload* to ``generation_status.json``."""
-    tmp = STATUS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(STATUS_FILE)
+    """Atomically write *payload* to ``generation_status.json``.
+
+    Uses a uniquely named temp file in the same directory, fsync, then replace —
+    avoids ENOENT from fixed ``generation_status.tmp`` races (cloud sync, AV, coalesced FS events).
+    Retries if the ModSources tree is briefly missing.
+    """
+    text = json.dumps(payload, indent=2) + "\n"
+    _atomic_write_text(STATUS_FILE, text)
     log.info("Status → %s", payload.get("status"))
 
 
 def _write_heartbeat() -> None:
-    HEARTBEAT_FILE.write_text(
-        json.dumps({
+    body = json.dumps(
+        {
             "status": "listening",
             "pid": os.getpid(),
             "timestamp": time.time(),
-        }, indent=2),
-        encoding="utf-8",
-    )
+            "mod_sources_root": str(_MOD_SOURCES.resolve()),
+        },
+        indent=2,
+    ) + "\n"
+    _atomic_write_text(HEARTBEAT_FILE, body)
 
 
 def _clear_heartbeat() -> None:
@@ -80,6 +89,63 @@ def _clear_heartbeat() -> None:
         HEARTBEAT_FILE.unlink()
     except FileNotFoundError:
         pass
+
+
+def _release_lock() -> None:
+    try:
+        ORCHESTRATOR_LOCK_FILE.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_single_instance_lock() -> None:
+    """Refuse to start if another orchestrator holds the lock (same ModSources)."""
+    ORCHESTRATOR_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    pid = os.getpid()
+    if ORCHESTRATOR_LOCK_FILE.exists():
+        try:
+            old_raw = ORCHESTRATOR_LOCK_FILE.read_text(encoding="utf-8").strip()
+            old_pid = int(old_raw.splitlines()[0])
+        except (OSError, ValueError):
+            old_pid = -1
+        if _pid_alive(old_pid):
+            log.error(
+                "Another orchestrator is already running (PID %s, lock %s). Exiting.",
+                old_pid,
+                ORCHESTRATOR_LOCK_FILE,
+            )
+            sys.exit(1)
+        try:
+            ORCHESTRATOR_LOCK_FILE.unlink()
+        except OSError:
+            pass
+
+    try:
+        fd = os.open(ORCHESTRATOR_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"{pid}\n")
+    except FileExistsError:
+        log.error("Lock race on %s — retry or remove stale lock.", ORCHESTRATOR_LOCK_FILE)
+        sys.exit(1)
 
 
 def _set_stage(label: str, pct: int) -> None:
@@ -398,12 +464,14 @@ class _RequestHandler(FileSystemEventHandler):
 
 def main() -> None:
     log.info("The Forge Orchestrator starting up")
+    log.info("ModSources: %s", _MOD_SOURCES.resolve())
     log.info("Watching: %s", REQUEST_FILE)
     log.info("Status:   %s", STATUS_FILE)
     log.info("Heartbeat: %s", HEARTBEAT_FILE)
 
     # Ensure the watched directory exists.
     REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _acquire_single_instance_lock()
     _write_heartbeat()
 
     # Keep the asyncio event loop alive so pipeline tasks can run.
@@ -425,6 +493,7 @@ def main() -> None:
         observer.stop()
         observer.join()
         _clear_heartbeat()
+        _release_lock()
         loop.close()
         log.info("Orchestrator stopped.")
 

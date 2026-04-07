@@ -1,0 +1,7 @@
+{
+  "include": ["agents"],
+  "exclude": ["agents/.venv", "**/__pycache__"],
+  "venvPath": "agents",
+  "venv": ".venv",
+  "pythonVersion": "3.12"
+}

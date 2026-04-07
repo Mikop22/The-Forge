@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Hard-coded balance tables
@@ -49,26 +52,184 @@ TIER_TABLE: dict[str, dict] = {
 
 VALID_TIERS = set(TIER_TABLE.keys())
 VALID_CONTENT_TYPES = {"Weapon", "Accessory", "Summon", "Consumable", "Tool"}
-VALID_BUFF_IDS = {
-    "BuffID.OnFire",
+
+# --- Buff IDs: one tuple drives set, sorted prompt line, and Literal (no drift). ---
+BUFF_ID_TUPLE: tuple[str, ...] = (
+    "BuffID.CursedInferno",
     "BuffID.Frostburn",
-    "BuffID.Slimed",
-    "BuffID.WellFed",
     "BuffID.ManaSickness",
+    "BuffID.OnFire",
     "BuffID.Poisoned",
     "BuffID.ShadowFlame",
-    "BuffID.CursedInferno",
-}
-VALID_AMMO_IDS = {
+    "BuffID.Slimed",
+    "BuffID.WellFed",
+    "BuffID.Weak",
+)
+VALID_BUFF_IDS: frozenset[str] = frozenset(BUFF_ID_TUPLE)
+BUFF_ID_CHOICES: tuple[str, ...] = tuple(sorted(BUFF_ID_TUPLE))
+BuffIDLiteral = Literal[*BUFF_ID_TUPLE]
+
+# --- Ammo IDs: same pattern. ---
+AMMO_ID_TUPLE: tuple[str, ...] = (
     "AmmoID.Arrow",
     "AmmoID.Bullet",
-    "AmmoID.Rocket",
-    "AmmoID.Dart",
-    "AmmoID.Sand",
-    "AmmoID.Gel",
-    "AmmoID.Snowball",
     "AmmoID.Coin",
+    "AmmoID.Dart",
     "AmmoID.Flare",
+    "AmmoID.Gel",
+    "AmmoID.Rocket",
+    "AmmoID.Sand",
+    "AmmoID.Snowball",
+)
+VALID_AMMO_IDS: frozenset[str] = frozenset(AMMO_ID_TUPLE)
+AMMO_ID_CHOICES: tuple[str, ...] = tuple(sorted(AMMO_ID_TUPLE))
+AmmoIDLiteral = Literal[*AMMO_ID_TUPLE]
+
+# Build lookup tables for bare-name -> prefixed-name normalization.
+_BARE_BUFF_LOOKUP = {v.removeprefix("BuffID."): v for v in VALID_BUFF_IDS}
+_BARE_AMMO_LOOKUP = {v.removeprefix("AmmoID."): v for v in VALID_AMMO_IDS}
+
+# LLMs often emit the in-game display name instead of the BuffID field name.
+_BUFF_DISPLAY_ALIASES: dict[str, str] = {
+    "On Fire!":          "BuffID.OnFire",
+    "On Fire":           "BuffID.OnFire",
+    "OnFire!":           "BuffID.OnFire",
+    "Cursed Inferno":    "BuffID.CursedInferno",
+    "Shadow Flame":      "BuffID.ShadowFlame",
+    "Mana Sickness":     "BuffID.ManaSickness",
+    "Well Fed":          "BuffID.WellFed",
+    "Frost Burn":        "BuffID.Frostburn",
+    "Weak":              "BuffID.Weak",
+    "Weakness":          "BuffID.Weak",
+}
+
+
+def _looks_like_buff_prose(value: str) -> bool:
+    """Apply loose burn/poison heuristics only for sentence-like LLM output, not short tokens."""
+    s = value.strip()
+    if not s:
+        return False
+    if s.startswith("BuffID.") and s in VALID_BUFF_IDS:
+        return False
+    if s in VALID_BUFF_IDS:
+        return False
+    if s in _BUFF_DISPLAY_ALIASES:
+        return False
+    if s in _BARE_BUFF_LOOKUP or s in _BARE_BUFF_LOOKUP.values():
+        return False
+    if len(s) < 12 and " " not in s:
+        return False
+    if " " not in s and len(s) < 22:
+        return False
+    return True
+
+
+def _extract_buff_id_from_text(value: str) -> str | None:
+    lowered = value.lower()
+
+    for alias, canonical in sorted(_BUFF_DISPLAY_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if alias.lower() in lowered:
+            return canonical
+
+    for bare_name, canonical in sorted(_BARE_BUFF_LOOKUP.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(rf"\b{re.escape(bare_name.lower())}\b", lowered):
+            return canonical
+
+    for buff_id in sorted(VALID_BUFF_IDS, key=len, reverse=True):
+        if buff_id.lower() in lowered:
+            return buff_id
+
+    # Prose-only phrases (LLMs often omit exact BuffID tokens) — gated to avoid mis-mapping short tokens.
+    if _looks_like_buff_prose(value):
+        if "frostburn" in lowered.replace(" ", "") or re.search(r"\bfrost\s*burn\b", lowered):
+            return "BuffID.Frostburn"
+        if re.search(r"\b(burning|burned)\b", lowered) or (
+            re.search(r"\bburn\b", lowered) and "frost" not in lowered
+        ):
+            return "BuffID.OnFire"
+        if re.search(r"\b(poisoned|poison)\b", lowered):
+            return "BuffID.Poisoned"
+
+    return None
+
+
+def _normalize_buff_id(value: str) -> str | None:
+    """Map free text or aliases to a canonical ``BuffID.*``, or ``None`` if unknown.
+
+    Never returns invented strings — only members of :data:`VALID_BUFF_IDS` or ``None``.
+    """
+    s = str(value).strip()
+    if not s:
+        return None
+    if s in VALID_BUFF_IDS:
+        return s
+    if s in _BUFF_DISPLAY_ALIASES:
+        return _BUFF_DISPLAY_ALIASES[s]
+    if s in _BARE_BUFF_LOOKUP:
+        return _BARE_BUFF_LOOKUP[s]
+    extracted = _extract_buff_id_from_text(s)
+    if extracted in VALID_BUFF_IDS:
+        return extracted
+    return None
+
+
+def _normalize_ammo_id(value: str) -> str:
+    """Accept both ``'Arrow'`` and ``'AmmoID.Arrow'``."""
+    if value in VALID_AMMO_IDS:
+        return value
+    return _BARE_AMMO_LOOKUP.get(value, value)
+
+
+PROJECTILE_ID_ALIASES = {
+    # Common LLM-generated names that don't match the actual ProjectileID field names:
+    "ProjectileID.Fireball":       "ProjectileID.BallofFire",
+    "Fireball":                    "ProjectileID.BallofFire",
+    "FireBall":                    "ProjectileID.BallofFire",
+    "ProjectileID.FireBall":       "ProjectileID.BallofFire",
+    "FireBolt":                    "ProjectileID.BallofFire",
+    "ProjectileID.FireBolt":       "ProjectileID.BallofFire",
+    "FlameOrb":                    "ProjectileID.BallofFire",
+    "ProjectileID.FlameOrb":       "ProjectileID.BallofFire",
+    "SwordBeam":                   "ProjectileID.StarWrath",
+    "ProjectileID.SwordBeam":      "ProjectileID.StarWrath",
+    "LightBeam":                   "ProjectileID.LightBlade",
+    "ProjectileID.LightBeam":      "ProjectileID.LightBlade",
+    "LightBolt":                   "ProjectileID.LightBlade",
+    "ProjectileID.LightBolt":      "ProjectileID.LightBlade",
+    "IceBeam":                     "ProjectileID.Blizzard",
+    "ProjectileID.IceBeam":        "ProjectileID.Blizzard",
+    "IceBolt":                     "ProjectileID.IceSickle",
+    "ProjectileID.IceBolt":        "ProjectileID.IceSickle",
+    "FrostBolt":                   "ProjectileID.FrostBoltSword",
+    "ProjectileID.FrostBolt":      "ProjectileID.FrostBoltSword",
+    "FrostBeam":                   "ProjectileID.FrostBoltSword",
+    "ProjectileID.FrostBeam":      "ProjectileID.FrostBoltSword",
+    "ShadowBolt":                  "ProjectileID.ShadowBeam",
+    "ProjectileID.ShadowBolt":     "ProjectileID.ShadowBeam",
+    "DarkBolt":                    "ProjectileID.ShadowBeam",
+    "ProjectileID.DarkBolt":       "ProjectileID.ShadowBeam",
+    "DarkBeam":                    "ProjectileID.ShadowBeam",
+    "ProjectileID.DarkBeam":       "ProjectileID.ShadowBeam",
+    "MagicBolt":                   "ProjectileID.MagicMissile",
+    "ProjectileID.MagicBolt":      "ProjectileID.MagicMissile",
+    "MagicBeam":                   "ProjectileID.MagicMissile",
+    "ProjectileID.MagicBeam":      "ProjectileID.MagicMissile",
+    "VoidBolt":                    "ProjectileID.ShadowBeam",
+    "ProjectileID.VoidBolt":       "ProjectileID.ShadowBeam",
+    "VoidBeam":                    "ProjectileID.ShadowBeam",
+    "ProjectileID.VoidBeam":       "ProjectileID.ShadowBeam",
+    "StarBeam":                    "ProjectileID.Starfury",
+    "ProjectileID.StarBeam":       "ProjectileID.Starfury",
+    "StarBolt":                    "ProjectileID.Starfury",
+    "ProjectileID.StarBolt":       "ProjectileID.Starfury",
+    "LavaOrb":                     "ProjectileID.BallofFire",
+    "ProjectileID.LavaOrb":        "ProjectileID.BallofFire",
+    "LavaBolt":                    "ProjectileID.BallofFire",
+    "ProjectileID.LavaBolt":       "ProjectileID.BallofFire",
+    "ThunderBolt":                 "ProjectileID.BallLightning",
+    "ProjectileID.ThunderBolt":    "ProjectileID.BallLightning",
+    "LightningBolt":               "ProjectileID.BallLightning",
+    "ProjectileID.LightningBolt":  "ProjectileID.BallLightning",
 }
 
 # User-facing crafting station name → tModLoader TileID constant
@@ -103,6 +264,13 @@ def _clamp_icon_size(icon_size: list[int], lo: int, hi: int, default: list[int])
         icon_size = default
     w, h = int(icon_size[0]), int(icon_size[1])
     return [_clamp(w, lo, hi), _clamp(h, lo, hi)]
+
+
+def _normalize_projectile_id(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+
+    return PROJECTILE_ID_ALIASES.get(str(value), str(value))
 
 
 def resolve_crafting(user_prompt: str, tier: str, crafting_station: str | None = None) -> dict:
@@ -180,10 +348,17 @@ class ProjectileVisuals(BaseModel):
 
 
 class LLMMechanics(BaseModel):
+    """Mechanics from the LLM.
+
+    ``on_hit_buff`` / ``buff_id`` use :class:`BuffIDLiteral` so JSON Schema exposes a
+    closed enum to the model; ``mode="before"`` validators still map prose aliases
+    onto those same IDs (or ``None``).
+    """
+
     shoot_projectile: Optional[str] = None
-    on_hit_buff: Optional[str] = None
-    buff_id: Optional[str] = None
-    ammo_id: Optional[str] = None
+    on_hit_buff: Optional[BuffIDLiteral] = None
+    buff_id: Optional[BuffIDLiteral] = None
+    ammo_id: Optional[AmmoIDLiteral] = None
     custom_projectile: bool = False
     crafting_material: Optional[str] = None
     crafting_cost: Optional[int] = None
@@ -194,24 +369,28 @@ class LLMMechanics(BaseModel):
     def validate_buff_ids(cls, value):
         if value in (None, ""):
             return None
-        value = str(value)
-        if value not in VALID_BUFF_IDS:
-            raise ValueError(
-                f"Unknown BuffID: {value!r}. Must be one of {sorted(VALID_BUFF_IDS)}"
-            )
-        return value
+        raw = str(value)
+        normalized = _normalize_buff_id(raw)
+        if normalized is not None:
+            return normalized
+        log.warning("Dropping unrecognisable buff value from LLM: %r", raw)
+        return None
 
     @field_validator("ammo_id", mode="before")
     @classmethod
     def validate_ammo_ids(cls, value):
         if value in (None, ""):
             return None
-        value = str(value)
-        if value not in VALID_AMMO_IDS:
-            raise ValueError(
-                f"Unknown AmmoID: {value!r}. Must be one of {sorted(VALID_AMMO_IDS)}"
-            )
-        return value
+        normalized = _normalize_ammo_id(str(value))
+        if normalized in VALID_AMMO_IDS:
+            return normalized
+        log.warning("Dropping unrecognisable ammo value from LLM: %r", value)
+        return None
+
+    @field_validator("shoot_projectile", mode="before")
+    @classmethod
+    def normalize_projectile_ids(cls, value):
+        return _normalize_projectile_id(value)
 
 
 class AccessoryStats(BaseModel):
@@ -322,9 +501,9 @@ class Visuals(BaseModel):
 
 class Mechanics(BaseModel):
     shoot_projectile: Optional[str] = None
-    on_hit_buff: Optional[str] = None
-    buff_id: Optional[str] = None
-    ammo_id: Optional[str] = None
+    on_hit_buff: Optional[BuffIDLiteral] = None
+    buff_id: Optional[BuffIDLiteral] = None
+    ammo_id: Optional[AmmoIDLiteral] = None
     custom_projectile: bool = False
     crafting_material: str
     crafting_cost: int
@@ -335,24 +514,28 @@ class Mechanics(BaseModel):
     def validate_buff_ids(cls, value):
         if value in (None, ""):
             return None
-        value = str(value)
-        if value not in VALID_BUFF_IDS:
-            raise ValueError(
-                f"Unknown BuffID: {value!r}. Must be one of {sorted(VALID_BUFF_IDS)}"
-            )
-        return value
+        raw = str(value)
+        normalized = _normalize_buff_id(raw)
+        if normalized is not None:
+            return normalized
+        log.warning("Dropping unrecognisable buff value: %r", raw)
+        return None
 
     @field_validator("ammo_id", mode="before")
     @classmethod
     def validate_ammo_ids(cls, value):
         if value in (None, ""):
             return None
-        value = str(value)
-        if value not in VALID_AMMO_IDS:
-            raise ValueError(
-                f"Unknown AmmoID: {value!r}. Must be one of {sorted(VALID_AMMO_IDS)}"
-            )
-        return value
+        normalized = _normalize_ammo_id(str(value))
+        if normalized in VALID_AMMO_IDS:
+            return normalized
+        log.warning("Dropping unrecognisable ammo value: %r", value)
+        return None
+
+    @field_validator("shoot_projectile", mode="before")
+    @classmethod
+    def normalize_projectile_ids(cls, value):
+        return _normalize_projectile_id(value)
 
 
 try:

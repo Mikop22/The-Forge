@@ -12,6 +12,14 @@ namespace ForgeConnector.Content.Buffs
     {
         public abstract int SlotIndex { get; }
 
+        /// <summary>
+        /// Default ModBuff texture path is one PNG per class name; we use a single placeholder for all
+        /// template slots so we do not ship 25 duplicate files. Item/projectile art can be patched at
+        /// runtime from inject; buff icons use this shared asset until a buff texture path exists in the
+        /// connector pipeline.
+        /// </summary>
+        public override string Texture => "ForgeConnector/Content/Buffs/ForgeBuff_Placeholder";
+
         public override void SetStaticDefaults()
         {
             Main.buffNoSave[Type] = true;

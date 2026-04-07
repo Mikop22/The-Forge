@@ -41,6 +41,13 @@ node_modules/
 *.so
 *.dylib
 /theforge
+BubbleTeaTerminal/theforge
+
+# Generated sprites (Pixelsmith)
+agents/output/
+
+# Local tool caches (not .worktrees/ — see below)
+.claude/
 
 # IDE / editor
 .idea/

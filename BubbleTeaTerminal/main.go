@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -34,12 +35,14 @@ const (
 type forgeDoneMsg struct{}
 type forgeErrMsg struct{ message string }
 type pollStatusMsg struct{}
-type injectDoneMsg struct{ err error }
 type bridgeStatusMsg struct{ alive bool }
 
 type animTickMsg time.Time
 type pollConnectorStatusMsg struct{ attempt int }
-type connectorStatusMsg struct{ status string }
+type connectorStatusMsg struct {
+	status string
+	detail string
+}
 
 type previewMode int
 
@@ -74,6 +77,7 @@ type craftedItem struct {
 	craftingStation string
 	stats           itemStats
 	spritePath      string
+	projSpritePath  string
 }
 
 type statField struct {
@@ -179,14 +183,14 @@ type model struct {
 	forgeManifest  map[string]interface{} // full manifest from backend
 	forgeSprPath   string                 // sprite PNG path from backend
 	forgeProjPath  string                 // projectile sprite PNG path from backend
-	injectMode     bool                   // true = instant inject (template pool), false = legacy compile
 	previewMode    previewMode
 	previewItem    *craftedItem
 	statEditIndex  int
 
 	bridgeAlive   bool   // forge_connector_alive.json present with live PID
 	injectErr     string // non-empty if command_trigger write failed
-	injectStatus  string // "reload_triggered", "reload_failed", "item_injected", "inject_failed", "timeout", or ""
+	injectStatus  string // "reload_triggered", "reload_failed", "item_injected", "item_pending", "inject_failed", "timeout", or ""
+	injectDetail  string // optional message from forge_connector_status (e.g. item_pending explanation)
 	pendingManifest map[string]interface{}
 	pendingArtFeedback string
 }
@@ -203,9 +207,112 @@ var wizardGlyphs = []string{"\u26e8", "\u2694", "\u2736", "\u27b6"}
 // Filesystem helpers – handshake with the Python orchestrator
 // ---------------------------------------------------------------------------
 
-func modSourcesDir() string {
+func configPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "theforge", "config.toml"), nil
+}
+
+func trimInlineComment(val string) string {
+	inQuote := byte(0)
+	escaped := false
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote != 0 {
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == inQuote {
+				inQuote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			inQuote = ch
+		case '#':
+			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' {
+				return strings.TrimSpace(val[:i])
+			}
+		}
+	}
+	return strings.TrimSpace(val)
+}
+
+// modSourcesDirFromConfig reads mod_sources_dir from ~/.config/theforge/config.toml
+// (root keys only, before any [section]) so the TUI matches the orchestrator when
+// FORGE_MOD_SOURCES_DIR is not set in the shell.
+func modSourcesDirFromConfig() string {
+	cfgPath, err := configPath()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			break
+		}
+		eqIdx := strings.Index(line, "=")
+		if eqIdx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eqIdx])
+		if key != "mod_sources_dir" {
+			continue
+		}
+		val := strings.TrimSpace(line[eqIdx+1:])
+		val = trimInlineComment(val)
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+		dir := strings.TrimSpace(val)
+		if dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func modSourcesDirForOS(goos string) string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "Application Support", "Terraria", "tModLoader", "ModSources")
+	switch goos {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Terraria", "tModLoader", "ModSources")
+	case "windows":
+		userProfile := os.Getenv("USERPROFILE")
+		if userProfile == "" {
+			userProfile = home
+		}
+		return filepath.Join(userProfile, "Documents", "My Games", "Terraria", "tModLoader", "ModSources")
+	case "linux":
+		return filepath.Join(home, ".local", "share", "Terraria", "tModLoader", "ModSources")
+	default:
+		return filepath.Join(home, "Library", "Application Support", "Terraria", "tModLoader", "ModSources")
+	}
+}
+
+func modSourcesDir() string {
+	if dir := strings.TrimSpace(os.Getenv("FORGE_MOD_SOURCES_DIR")); dir != "" {
+		return dir
+	}
+	if dir := modSourcesDirFromConfig(); dir != "" {
+		return dir
+	}
+	return modSourcesDirForOS(runtime.GOOS)
 }
 
 func tierToKey(tier string) string {
@@ -260,24 +367,19 @@ func writeUserRequest(prompt, tier, contentType, subType, craftingStation string
 }
 
 type pipelineStatus struct {
-	status              string
-	itemName            string
-	errMsg              string
-	stagePct            int
-	stageLabel          string
-	manifest            map[string]interface{}
-	spritePath          string
+	status               string
+	itemName             string
+	errMsg               string
+	stagePct             int
+	stageLabel           string
+	manifest             map[string]interface{}
+	spritePath           string
 	projectileSpritePath string
-	injectMode          bool
 }
 
-func readGenerationStatus() pipelineStatus {
-	data, err := os.ReadFile(filepath.Join(modSourcesDir(), "generation_status.json"))
-	if err != nil {
-		return pipelineStatus{}
-	}
+func parseGenerationStatusBytes(data []byte) pipelineStatus {
 	var result map[string]interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if json.Unmarshal(data, &result) != nil {
 		return pipelineStatus{}
 	}
 	ps := pipelineStatus{}
@@ -295,10 +397,80 @@ func readGenerationStatus() pipelineStatus {
 	}
 	ps.spritePath, _ = result["sprite_path"].(string)
 	ps.projectileSpritePath, _ = result["projectile_sprite_path"].(string)
-	if im, ok := result["inject_mode"].(bool); ok {
-		ps.injectMode = im
-	}
 	return ps
+}
+
+// mergeGatekeeperGenerationStatus merges ForgeGeneratedMod/generation_status.json (legacy
+// Gatekeeper-only writes) into the root status. Only called when root generation_status.json
+// exists and parsed status is non-empty (see readGenerationStatus).
+func mergeGatekeeperGenerationStatus(root pipelineStatus, gkRaw []byte) pipelineStatus {
+	if root.status == "ready" {
+		return root
+	}
+	var gk map[string]interface{}
+	if json.Unmarshal(gkRaw, &gk) != nil {
+		return root
+	}
+	st, _ := gk["status"].(string)
+	if st == "" {
+		return root
+	}
+	msg, _ := gk["message"].(string)
+	switch st {
+	case "finishing":
+		root.status = "building"
+		if msg != "" {
+			root.stageLabel = msg
+		}
+		if root.stagePct < 95 {
+			root.stagePct = 95
+		}
+	case "building":
+		if lbl, ok := gk["stage_label"].(string); ok && lbl != "" {
+			root.stageLabel = lbl
+		} else if msg != "" {
+			root.stageLabel = msg
+		}
+		if pct, ok := gk["stage_pct"].(float64); ok {
+			root.stagePct = max(root.stagePct, int(pct))
+		} else if root.stagePct < 85 {
+			root.stagePct = 85
+		}
+	case "error":
+		root.status = "error"
+		if msg != "" {
+			root.errMsg = msg
+		}
+		if code, ok := gk["error_code"].(string); ok && code != "" {
+			if root.errMsg != "" {
+				root.errMsg = root.errMsg + " (" + code + ")"
+			} else {
+				root.errMsg = code
+			}
+		}
+	}
+	return root
+}
+
+func readGenerationStatus() pipelineStatus {
+	dir := modSourcesDir()
+	rootPath := filepath.Join(dir, "generation_status.json")
+	data, err := os.ReadFile(rootPath)
+	if err != nil {
+		// No root file — do not merge stale ForgeGeneratedMod/generation_status.json alone.
+		return pipelineStatus{}
+	}
+	root := parseGenerationStatusBytes(data)
+	if root.status == "" {
+		// Unparseable or empty JSON — do not promote stale Gatekeeper-only state.
+		return root
+	}
+	gkPath := filepath.Join(dir, "ForgeGeneratedMod", "generation_status.json")
+	gkData, err := os.ReadFile(gkPath)
+	if err != nil {
+		return root
+	}
+	return mergeGatekeeperGenerationStatus(root, gkData)
 }
 
 func pollStatusCmd() tea.Cmd {
@@ -314,16 +486,73 @@ func pollConnectorStatusCmd(attempt int) tea.Cmd {
 }
 
 func readConnectorStatus() string {
+	status, _ := readConnectorStatusPayload()
+	return status
+}
+
+// readConnectorStatusPayload returns connector status and optional detail (e.g. inject_failed message).
+func readConnectorStatusPayload() (status string, detail string) {
 	data, err := os.ReadFile(filepath.Join(modSourcesDir(), "forge_connector_status.json"))
+	if err != nil {
+		return "", ""
+	}
+	var result map[string]interface{}
+	if json.Unmarshal(data, &result) != nil {
+		return "", ""
+	}
+	status, _ = result["status"].(string)
+	if m, ok := result["message"].(string); ok && m != "" {
+		detail = m
+	}
+	if detail == "" {
+		if name, ok := result["item_name"].(string); ok && name != "" {
+			detail = name
+		}
+	}
+	return status, detail
+}
+
+// warnPathMismatches logs to stderr when heartbeat files report a different ModSources
+// path than this TUI resolves (misconfigured FORGE_MOD_SOURCES_DIR vs config.toml).
+func warnPathMismatches() {
+	local := filepath.Clean(modSourcesDir())
+	orch := readHeartbeatModSourcesRoot(filepath.Join(modSourcesDir(), "orchestrator_alive.json"))
+	if orch != "" && filepath.Clean(orch) != local {
+		fmt.Fprintf(os.Stderr, "[forge] warning: orchestrator reports ModSources %q but this TUI resolves %q — align FORGE_MOD_SOURCES_DIR and ~/.config/theforge/config.toml\n", orch, local)
+	}
+	bridgePath := filepath.Join(modSourcesDir(), "forge_connector_alive.json")
+	bridge := readHeartbeatModSourcesRoot(bridgePath)
+	if bridge != "" && filepath.Clean(bridge) != local {
+		fmt.Fprintf(os.Stderr, "[forge] warning: ForgeConnector reports ModSources %q but this TUI resolves %q — set FORGE_MOD_SOURCES_DIR for both the game and this terminal\n", bridge, local)
+	}
+	// ForgeConnector does not read config.toml; if ModSources is only customized there,
+	// the game defaults to the OS path unless FORGE_MOD_SOURCES_DIR is set.
+	if strings.TrimSpace(os.Getenv("FORGE_MOD_SOURCES_DIR")) == "" {
+		if cfg := modSourcesDirFromConfig(); cfg != "" {
+			def := filepath.Clean(modSourcesDirForOS(runtime.GOOS))
+			if filepath.Clean(cfg) != def && bridge == "" {
+				fmt.Fprintf(os.Stderr, "[forge] hint: ~/.config/theforge/config.toml sets a non-default ModSources; set FORGE_MOD_SOURCES_DIR when launching tModLoader so ForgeConnector uses the same folder as this TUI.\n")
+			}
+		}
+	}
+}
+
+func readHeartbeatModSourcesRoot(path string) string {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
+	var hb map[string]interface{}
+	if json.Unmarshal(data, &hb) != nil {
 		return ""
 	}
-	status, _ := result["status"].(string)
-	return status
+	if s, ok := hb["mod_sources_root"].(string); ok && s != "" {
+		return s
+	}
+	if s, ok := hb["mod_sources_dir"].(string); ok && s != "" {
+		return s
+	}
+	return ""
 }
 
 // writeCommandTrigger atomically writes command_trigger.json to ModSources.
@@ -621,7 +850,6 @@ func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forgeManifest = ps.manifest
 			m.forgeSprPath = ps.spritePath
 			m.forgeProjPath = ps.projectileSpritePath
-			m.injectMode = ps.injectMode
 			m.heat = 100
 			return m, func() tea.Msg { return forgeDoneMsg{} }
 		case "error":
@@ -667,18 +895,10 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bridgeStatusMsg:
 		m.bridgeAlive = msg.alive
 		return m, nil
-	case injectDoneMsg:
-		if msg.err != nil {
-			m.injecting = false
-			m.injectErr = msg.err.Error()
-			return m, nil
-		}
-		// Trigger written successfully — poll for connector confirmation.
-		return m, pollConnectorStatusCmd(0)
 	case pollConnectorStatusMsg:
 		const maxAttempts = 60 // 30 seconds at 500ms intervals
-		if status := readConnectorStatus(); status != "" {
-			return m, func() tea.Msg { return connectorStatusMsg{status: status} }
+		if status, detail := readConnectorStatusPayload(); status != "" {
+			return m, func() tea.Msg { return connectorStatusMsg{status: status, detail: detail} }
 		}
 		if msg.attempt >= maxAttempts {
 			return m, func() tea.Msg { return connectorStatusMsg{status: "timeout"} }
@@ -687,7 +907,8 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectorStatusMsg:
 		m.injecting = false
 		m.injectStatus = msg.status
-		if msg.status == "item_injected" {
+		m.injectDetail = msg.detail
+		if msg.status == "item_injected" || msg.status == "item_pending" {
 			// For instant inject, auto-clear the forge_inject.json to prevent re-inject
 			_ = os.Remove(filepath.Join(modSourcesDir(), "forge_inject.json"))
 		}
@@ -754,6 +975,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forgeProjPath = ""
 			m.injectErr = ""
 			m.injectStatus = ""
+			m.injectDetail = ""
 			m.state = screenInput
 			m.textInput.Focus()
 			return m, nil
@@ -773,24 +995,18 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.injecting = true
 			m.injectErr = ""
 			m.injectStatus = ""
+			m.injectDetail = ""
 			m.appendPreviewHistory()
-			if m.injectMode {
-				// Write forge_inject.json fresh from stored manifest data.
-				// The orchestrator's copy may have been consumed by a prior attempt.
-				dir := modSourcesDir()
-				_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
-				if err := writeInjectFile(m.forgeManifest, m.forgeItemName, m.forgeSprPath, m.forgeProjPath); err != nil {
-					m.injecting = false
-					m.injectErr = err.Error()
-					return m, nil
-				}
-				return m, pollConnectorStatusCmd(0)
+			// Always use the instant inject path: write forge_inject.json and
+			// let the ForgeConnector mod pick it up on the next game tick.
+			dir := modSourcesDir()
+			_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
+			if err := writeInjectFile(m.forgeManifest, m.forgeItemName, m.forgeSprPath, m.forgeProjPath); err != nil {
+				m.injecting = false
+				m.injectErr = err.Error()
+				return m, nil
 			}
-			// Legacy: trigger mod reload via command_trigger.json.
-			injectCmd := func() tea.Msg {
-				return injectDoneMsg{err: writeCommandTrigger()}
-			}
-			return m, injectCmd
+			return m, pollConnectorStatusCmd(0)
 		}
 	}
 	return m, nil
@@ -922,25 +1138,27 @@ func (m model) stagingView() string {
 		}
 
 		if m.revealPhase >= 3 {
-			sprite := renderPreviewAnimation(renderSprite(latest.spritePath), latest.contentType, latest.subType, m.animTick)
+			sprite := renderSprite(latest.spritePath)
+			projSprite := renderSprite(latest.projSpritePath)
 			stats := renderStats(latest.stats)
 
-			if sprite != "" || stats != "" {
+			if sprite != "" || projSprite != "" || stats != "" {
 				headerLines = append(headerLines, "")
 				var panels []string
 				if sprite != "" {
 					spriteBox := styles.SpriteFrame.Render(sprite)
 					panels = append(panels, spriteBox)
 				}
+				if projSprite != "" {
+					arrow := styles.Hint.Render("→")
+					projBox := styles.SpriteFrame.Render(projSprite)
+					panels = append(panels, arrow, projBox)
+				}
 				if stats != "" {
 					statsBox := styles.StatsFrame.Render(stats)
 					panels = append(panels, statsBox)
 				}
-				if len(panels) == 2 {
-					headerLines = append(headerLines, lipgloss.JoinHorizontal(lipgloss.Top, panels[0], "  ", panels[1]))
-				} else if len(panels) == 1 {
-					headerLines = append(headerLines, panels[0])
-				}
+				headerLines = append(headerLines, lipgloss.JoinHorizontal(lipgloss.Top, panels...))
 			}
 		}
 
@@ -968,16 +1186,21 @@ func (m model) stagingView() string {
 
 	switch {
 	case m.injecting:
-		if m.injectMode {
-			headerLines = append(headerLines, "", styles.Injecting.Render("⟳ Injecting into Terraria..."))
-		} else {
-			headerLines = append(headerLines, "", styles.Injecting.Render("⟳ Waiting for Terraria..."))
-		}
+		headerLines = append(headerLines, "", styles.Injecting.Render("⟳ Injecting into Terraria..."))
 	case m.injectStatus == "item_injected":
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Item appeared in your inventory!"))
 		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
+	case m.injectStatus == "item_pending":
+		headerLines = append(headerLines, "", styles.Success.Render("✔ Item registered — enter a world to receive it"))
+		if m.injectDetail != "" {
+			headerLines = append(headerLines, styles.Hint.Render(m.injectDetail))
+		}
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
 	case m.injectStatus == "inject_failed":
 		headerLines = append(headerLines, "", styles.Error.Render("✘ Injection failed"))
+		if m.injectDetail != "" {
+			headerLines = append(headerLines, styles.Hint.Render(m.injectDetail))
+		}
 		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
 	case m.injectStatus == "reload_triggered":
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Mod reloading in Terraria"))
@@ -1115,13 +1338,13 @@ func (m *model) resetForCraftAnother() {
 	m.forgeManifest = nil
 	m.forgeSprPath = ""
 	m.forgeProjPath = ""
-	m.injectMode = false
 	m.previewMode = previewModeActions
 	m.previewItem = nil
 	m.statEditIndex = 0
 	m.bridgeAlive = false
 	m.injectErr = ""
 	m.injectStatus = ""
+	m.injectDetail = ""
 	m.pendingManifest = nil
 	m.pendingArtFeedback = ""
 	m.textInput.SetValue("")
@@ -1150,6 +1373,7 @@ func (m model) buildCraftedItem() craftedItem {
 		craftingStation: m.craftingStation,
 		stats:           extractItemStats(m.forgeManifest),
 		spritePath:      m.forgeSprPath,
+		projSpritePath:  m.forgeProjPath,
 	}
 }
 
@@ -1257,41 +1481,6 @@ func (m *model) appendPreviewHistory() {
 	m.craftedItems = append(m.craftedItems, *m.previewItem)
 }
 
-func renderPreviewAnimation(sprite, contentType, subType string, tick int) string {
-	if sprite == "" {
-		return ""
-	}
-	switch {
-	case contentType == "Summon":
-		bob := []int{0, 1, 0, 1}[tick%4]
-		return fmt.Sprintf("☺\n%s%s", strings.Repeat(" ", bob), sprite)
-	case contentType == "Accessory":
-		return sprite + "\n+" + " passive aura"
-	case contentType == "Consumable":
-		if tick%4 == 0 {
-			return sprite + "\n gulp"
-		}
-		return sprite
-	case subType == "Gun" || subType == "Bow" || subType == "Staff" || subType == "Cannon":
-		return fmt.Sprintf("@ %s %s•", sprite, strings.Repeat(" ", tick%4))
-	case subType == "Spear":
-		return shiftPreviewSprite(sprite, tick%4)
-	default:
-		swingMarks := []string{"\\", "|", "/", "-"}
-		return fmt.Sprintf("%s %s", swingMarks[tick%len(swingMarks)], shiftPreviewSprite(sprite, tick%3))
-	}
-}
-
-func shiftPreviewSprite(sprite string, offset int) string {
-	if offset <= 0 {
-		return sprite
-	}
-	lines := strings.Split(sprite, "\n")
-	for i, line := range lines {
-		lines[i] = strings.Repeat(" ", offset) + line
-	}
-	return strings.Join(lines, "\n")
-}
 
 // ---------------------------------------------------------------------------
 // Sprite ASCII-art renderer
@@ -1693,6 +1882,7 @@ func ensureOrchestrator() {
 
 func main() {
 	ensureOrchestrator()
+	warnPathMismatches()
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error running forge ui: %v\n", err)

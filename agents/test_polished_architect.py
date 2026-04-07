@@ -121,31 +121,59 @@ class ArchitectManifestTests(unittest.TestCase):
         self.assertEqual(manifest.mechanics.buff_id, "BuffID.WellFed")
         self.assertEqual(manifest.mechanics.ammo_id, "AmmoID.Arrow")
 
-        with self.assertRaises(ValidationError):
-            ItemManifest.model_validate({
-                "item_name": "BadCharm",
-                "display_name": "Bad Charm",
-                "tooltip": "Broken.",
-                "content_type": "Accessory",
-                "type": "Weapon",
-                "sub_type": "Charm",
-                "stats": {
-                    "damage": 10,
-                    "knockback": 0.0,
-                    "crit_chance": 4,
-                    "use_time": 20,
-                    "auto_reuse": True,
-                    "rarity": "ItemRarityID.White",
-                },
-                "visuals": {},
-                "mechanics": {
-                    "crafting_material": "ItemID.IceBlock",
-                    "crafting_cost": 5,
-                    "crafting_tile": "TileID.WorkBenches",
-                    "buff_id": "BuffID.NotReal",
-                    "ammo_id": "AmmoID.Arrow",
-                },
-            })
+        bad_manifest = ItemManifest.model_validate({
+            "item_name": "BadCharm",
+            "display_name": "Bad Charm",
+            "tooltip": "Broken.",
+            "content_type": "Accessory",
+            "type": "Weapon",
+            "sub_type": "Charm",
+            "stats": {
+                "damage": 10,
+                "knockback": 0.0,
+                "crit_chance": 4,
+                "use_time": 20,
+                "auto_reuse": True,
+                "rarity": "ItemRarityID.White",
+            },
+            "visuals": {},
+            "mechanics": {
+                "crafting_material": "ItemID.IceBlock",
+                "crafting_cost": 5,
+                "crafting_tile": "TileID.WorkBenches",
+                "buff_id": "BuffID.NotReal",
+                "ammo_id": "AmmoID.Arrow",
+            },
+        })
+        self.assertIsNone(bad_manifest.mechanics.buff_id)
+
+    def test_item_manifest_normalizes_projectile_aliases(self) -> None:
+        manifest = ItemManifest.model_validate({
+            "item_name": "CinderBrand",
+            "display_name": "Cinder Brand",
+            "tooltip": "A fiery sword.",
+            "content_type": "Weapon",
+            "type": "Weapon",
+            "sub_type": "Sword",
+            "stats": {
+                "damage": 34,
+                "knockback": 5.5,
+                "crit_chance": 4,
+                "use_time": 22,
+                "auto_reuse": True,
+                "rarity": "ItemRarityID.Orange",
+            },
+            "visuals": {},
+            "mechanics": {
+                "shoot_projectile": "ProjectileID.Fireball",
+                "on_hit_buff": "BuffID.OnFire",
+                "crafting_material": "ItemID.HellstoneBar",
+                "crafting_cost": 15,
+                "crafting_tile": "TileID.Anvils",
+            },
+        })
+
+        self.assertEqual(manifest.mechanics.shoot_projectile, "ProjectileID.BallofFire")
 
 
 class OrchestratorRequestTests(unittest.IsolatedAsyncioTestCase):

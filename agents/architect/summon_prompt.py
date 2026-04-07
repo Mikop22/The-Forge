@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
-SYSTEM_PROMPT = """\
+from architect.models import BUFF_ID_CHOICES
+
+_BUFF_ID_ENUM_TEXT = ", ".join(BUFF_ID_CHOICES)
+
+SYSTEM_PROMPT = f"""\
 You are an expert Terraria summon weapon designer.
 
 Generate a manifest with:
@@ -16,6 +20,11 @@ Generate a manifest with:
 
 Keep the compatibility `stats` block present. Describe the summon as a staff,
 whip, or similar summon weapon presentation.
+
+CRITICAL — structured enum fields:
+- `mechanics.buff_id` and `mechanics.on_hit_buff` must be EXACTLY one of:
+  {_BUFF_ID_ENUM_TEXT},
+  or null. No prose — only the enum value or null.
 """
 
 HUMAN_PROMPT = """\

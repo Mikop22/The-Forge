@@ -187,9 +187,173 @@ func TestAdjustPreviewStatMutatesManifest(t *testing.T) {
 	}
 }
 
-func TestRenderPreviewAnimationShowsShootMotion(t *testing.T) {
-	frame := renderPreviewAnimation("▀▀", "Weapon", "Gun", 3)
-	if !strings.Contains(frame, "•") {
-		t.Fatalf("shoot animation = %q, want projectile dot", frame)
+func TestModSourcesDirHonorsConfigTomlWhenEnvUnset(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("FORGE_MOD_SOURCES_DIR", "")
+
+	custom := filepath.Join(home, "custom", "ModSources")
+	writeForgeConfigWithModSources(t, home, custom)
+
+	got := modSourcesDir()
+	if got != custom {
+		t.Fatalf("modSourcesDir() = %q, want config mod_sources_dir %q", got, custom)
 	}
 }
+
+func TestModSourcesDirPrefersEnvOverConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	envDir := filepath.Join(home, "from-env")
+	cfgDir := filepath.Join(home, "from-config")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", envDir)
+	writeForgeConfigWithModSources(t, home, cfgDir)
+
+	got := modSourcesDir()
+	if got != envDir {
+		t.Fatalf("modSourcesDir() = %q, want FORGE_MOD_SOURCES_DIR %q", got, envDir)
+	}
+}
+
+func TestMergeGatekeeperGenerationStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ms := filepath.Join(home, "ModSources")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", ms)
+
+	if err := os.MkdirAll(filepath.Join(ms, "ForgeGeneratedMod"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rootJSON := `{"status":"building","stage_label":"Gatekeeper — Compiling mod...","stage_pct":80}`
+	if err := os.WriteFile(filepath.Join(ms, "generation_status.json"), []byte(rootJSON), 0644); err != nil {
+		t.Fatalf("write root status: %v", err)
+	}
+	gkJSON := `{"status":"building","message":"Compiling C#..."}`
+	if err := os.WriteFile(filepath.Join(ms, "ForgeGeneratedMod", "generation_status.json"), []byte(gkJSON), 0644); err != nil {
+		t.Fatalf("write gatekeeper status: %v", err)
+	}
+
+	ps := readGenerationStatus()
+	if ps.status != "building" {
+		t.Fatalf("status = %q, want building", ps.status)
+	}
+	if ps.stagePct < 85 {
+		t.Fatalf("stagePct = %d, want at least 85 from gatekeeper merge", ps.stagePct)
+	}
+	if !strings.Contains(ps.stageLabel, "Compiling") {
+		t.Fatalf("stageLabel = %q, want gatekeeper message merged", ps.stageLabel)
+	}
+}
+
+func TestReadGenerationStatusDoesNotMergeWhenRootStatusEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ms := filepath.Join(home, "ModSources")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", ms)
+
+	if err := os.MkdirAll(filepath.Join(ms, "ForgeGeneratedMod"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ms, "generation_status.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write root status: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(ms, "ForgeGeneratedMod", "generation_status.json"),
+		[]byte(`{"status":"building","message":"should-not-merge"}`),
+		0644,
+	); err != nil {
+		t.Fatalf("write gatekeeper status: %v", err)
+	}
+
+	ps := readGenerationStatus()
+	if ps.status != "" {
+		t.Fatalf("status = %q, want empty when root has no status field", ps.status)
+	}
+}
+
+func TestReadGenerationStatusIgnoresGatekeeperWithoutRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ms := filepath.Join(home, "ModSources")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", ms)
+
+	if err := os.MkdirAll(filepath.Join(ms, "ForgeGeneratedMod"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	err := os.WriteFile(
+		filepath.Join(ms, "ForgeGeneratedMod", "generation_status.json"),
+		[]byte(`{"status":"building","message":"stale-only-gatekeeper"}`),
+		0644,
+	)
+	if err != nil {
+		t.Fatalf("write gatekeeper status: %v", err)
+	}
+
+	ps := readGenerationStatus()
+	if ps.status != "" {
+		t.Fatalf("status = %q, want empty when root generation_status.json is absent", ps.status)
+	}
+}
+
+func TestModSourcesDirTrimsEnvWhitespace(t *testing.T) {
+	home := t.TempDir()
+	ms := filepath.Join(home, "MS")
+	t.Setenv("HOME", home)
+	t.Setenv("FORGE_MOD_SOURCES_DIR", "  "+ms+"  ")
+	got := modSourcesDir()
+	if got != ms {
+		t.Fatalf("modSourcesDir() = %q, want %q", got, ms)
+	}
+}
+
+func TestMergeGatekeeperDoesNotOverrideReady(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ms := filepath.Join(home, "ModSources")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", ms)
+
+	if err := os.MkdirAll(filepath.Join(ms, "ForgeGeneratedMod"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rootJSON := `{"status":"ready","stage_pct":100,"batch_list":["Blade"]}`
+	if err := os.WriteFile(filepath.Join(ms, "generation_status.json"), []byte(rootJSON), 0644); err != nil {
+		t.Fatalf("write root status: %v", err)
+	}
+	gkJSON := `{"status":"error","message":"stale"}`
+	if err := os.WriteFile(filepath.Join(ms, "ForgeGeneratedMod", "generation_status.json"), []byte(gkJSON), 0644); err != nil {
+		t.Fatalf("write gatekeeper status: %v", err)
+	}
+
+	ps := readGenerationStatus()
+	if ps.status != "ready" {
+		t.Fatalf("status = %q, want ready (root wins)", ps.status)
+	}
+}
+
+func writeForgeConfigWithModSources(t *testing.T, home, modSources string) {
+	t.Helper()
+	cfgDir := filepath.Join(home, ".config", "theforge")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	escaped := strings.ReplaceAll(strings.ReplaceAll(modSources, `\`, `\\`), `"`, `\"`)
+	content := `mode = "cloud"
+mod_sources_dir = "` + escaped + `"
+
+[cloud]
+openai_api_key = ""
+fal_key = ""
+fal_img2img_enabled = false
+
+[local]
+ollama_model = "llama3.1"
+ollama_base_url = "http://localhost:11434"
+weights_path = ""
+`
+	path := filepath.Join(cfgDir, "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using Microsoft.Xna.Framework;
@@ -36,6 +37,8 @@ namespace ForgeConnector
         private string _injectPath = string.Empty;
         private string _heartbeatPath = string.Empty;
         private string _statusPath = string.Empty;
+        private int _watcherRetryCooldown;
+        private int _injectPollCooldown;
 
         // ------------------------------------------------------------------
         // Lifecycle
@@ -131,6 +134,9 @@ namespace ForgeConnector
 
         public override void PostUpdateEverything()
         {
+            TryStartWatcherIfNeeded();
+            PollInjectFileFallback();
+
             // Handle legacy reload request
             if (Interlocked.Exchange(ref _reloadRequested, 0) == 1)
             {
@@ -254,20 +260,47 @@ namespace ForgeConnector
 
                 int itemTypeId = ForgeManifestStore.GetItemTypeId(itemSlot);
                 Mod.Logger.Info($"[ForgeConnector] Slot={itemSlot}, TypeId={itemTypeId}, LocalPlayer null={Main.LocalPlayer == null}");
-                if (itemTypeId > 0 && Main.LocalPlayer != null)
+                bool spawned = itemTypeId > 0 && Main.LocalPlayer != null;
+                if (spawned)
                 {
                     Main.LocalPlayer.QuickSpawnItem(Main.LocalPlayer.GetSource_Misc("ForgeConnector"), itemTypeId);
                     Mod.Logger.Info("[ForgeConnector] Item spawned successfully");
                 }
 
-                WriteStatus("item_injected", itemName, itemSlot);
-                Mod.Logger.Info("[ForgeConnector] Status written: item_injected");
+                if (itemTypeId > 0)
+                {
+                    if (spawned)
+                    {
+                        WriteStatus("item_injected", itemName, itemSlot);
+                        Mod.Logger.Info("[ForgeConnector] Status written: item_injected");
+                    }
+                    else
+                    {
+                        WriteStatus("item_pending", "No local player — open a world or unpause to receive the item.", itemSlot);
+                        Mod.Logger.Info("[ForgeConnector] Status written: item_pending (LocalPlayer null)");
+                    }
+                }
+                else
+                {
+                    WriteStatus("inject_failed", "Invalid item type id after registration.", -1);
+                }
             }
             catch (Exception ex)
             {
                 Mod.Logger.Error("[ForgeConnector] ProcessInject failed: " + ex);
                 WriteStatus("inject_failed", ex.Message, -1);
             }
+        }
+
+        /// <summary>Prefer manifest.type; fall back to content_type (Architect emits both).</summary>
+        private static string ReadContentTypeFromManifest(JsonElement manifest, string fallback)
+        {
+            string t = GetStr(manifest, "type", "");
+            if (string.IsNullOrWhiteSpace(t))
+                t = GetStr(manifest, "content_type", "");
+            if (string.IsNullOrWhiteSpace(t))
+                t = fallback;
+            return NormalizeContentType(t);
         }
 
         private ForgeItemData ParseManifest(JsonElement root)
@@ -278,7 +311,7 @@ namespace ForgeConnector
             data.Name = GetStr(manifest, "item_name", data.Name);
             data.DisplayName = GetStr(manifest, "display_name", data.Name);
             data.Tooltip = GetStr(manifest, "tooltip", data.Tooltip);
-            data.ContentType = NormalizeContentType(GetStr(manifest, "type", data.ContentType));
+            data.ContentType = ReadContentTypeFromManifest(manifest, data.ContentType);
             data.SubType = GetStr(manifest, "sub_type", data.SubType);
 
             if (manifest.TryGetProperty("stats", out var stats))
@@ -319,8 +352,21 @@ namespace ForgeConnector
                 {
                     data.CustomProjectile = false;
                 }
+                else if (!string.IsNullOrWhiteSpace(data.ShootProjectileName)
+                    && !IsCustomProjectileName(data.ShootProjectileName)
+                    && data.ShootProjectileName.IndexOf("ProjectileID.", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    // LLM requested a vanilla projectile that didn't resolve — fall back to BallofFire
+                    // so the weapon at least fires something visible rather than silently doing nothing.
+                    Mod.Logger.Warn($"[ForgeConnector] Unresolved shoot_projectile '{data.ShootProjectileName}' for '{data.Name}', falling back to BallofFire");
+                    data.ShootProjectileTypeId = ProjectileID.BallofFire;
+                    data.CustomProjectile = false;
+                }
 
-                data.BuffType = ResolveBuffId(GetStr(mechanics, "on_hit_buff", ""));
+                string onHitBuff = GetStr(mechanics, "on_hit_buff", "");
+                string buffIdField = GetStr(mechanics, "buff_id", "");
+                string buffRaw = string.IsNullOrWhiteSpace(onHitBuff) ? buffIdField : onHitBuff;
+                data.BuffType = ResolveBuffId(buffRaw);
                 data.BuffTime = GetInt(mechanics, "buff_time", data.BuffTime);
                 data.UseAmmoTypeId = ResolveAmmoId(GetStr(mechanics, "use_ammo", ""));
 
@@ -362,7 +408,7 @@ namespace ForgeConnector
             var manifest = GetManifest(root);
 
             data.Name = GetStr(manifest, "item_name", data.Name);
-            data.ContentType = NormalizeContentType(GetStr(manifest, "type", data.ContentType));
+            data.ContentType = ReadContentTypeFromManifest(manifest, data.ContentType);
             data.SubType = GetStr(manifest, "sub_type", data.SubType);
 
             if (manifest.TryGetProperty("projectile_visuals", out var pv)
@@ -433,7 +479,7 @@ namespace ForgeConnector
             var manifest = GetManifest(root);
 
             data.Name = GetStr(manifest, "item_name", data.Name);
-            data.ContentType = NormalizeContentType(GetStr(manifest, "type", data.ContentType));
+            data.ContentType = ReadContentTypeFromManifest(manifest, data.ContentType);
             data.SubType = GetStr(manifest, "sub_type", data.SubType);
             data.Tooltip = GetStr(manifest, "tooltip", data.Tooltip);
 
@@ -634,10 +680,48 @@ namespace ForgeConnector
                 token = token[(dot + 1)..];
 
             var field = staticType.GetField(token, BindingFlags.Public | BindingFlags.Static | BindingFlags.IgnoreCase);
+            if (field == null && staticType == typeof(ProjectileID))
+            {
+                token = NormalizeProjectileIdToken(token);
+                field = staticType.GetField(token, BindingFlags.Public | BindingFlags.Static | BindingFlags.IgnoreCase);
+            }
             if (field != null && field.FieldType == typeof(int))
                 return (int)field.GetValue(null)!;
 
             return -1;
+        }
+
+        private static string NormalizeProjectileIdToken(string token)
+        {
+            return token switch
+            {
+                // Common LLM-generated aliases that don't match the actual C# field names:
+                "Fireball"       => "BallofFire",
+                "FireBall"       => "BallofFire",
+                "FireBolt"       => "BallofFire",
+                "FlameOrb"       => "BallofFire",
+                "SwordBeam"      => "StarWrath",
+                "LightBeam"      => "LightBlade",
+                "LightBolt"      => "LightBlade",
+                "IceBeam"        => "Blizzard",
+                "IceBolt"        => "IceSickle",
+                "FrostBolt"      => "FrostBoltSword",
+                "FrostBeam"      => "FrostBoltSword",
+                "ShadowBolt"     => "ShadowBeam",
+                "DarkBolt"       => "ShadowBeam",
+                "DarkBeam"       => "ShadowBeam",
+                "MagicBolt"      => "MagicMissile",
+                "MagicBeam"      => "MagicMissile",
+                "VoidBolt"       => "ShadowBeam",
+                "VoidBeam"       => "ShadowBeam",
+                "StarBeam"       => "Starfury",
+                "StarBolt"       => "Starfury",
+                "LavaOrb"        => "BallofFire",
+                "LavaBolt"       => "BallofFire",
+                "ThunderBolt"    => "BallLightning",
+                "LightningBolt"  => "BallLightning",
+                _ => token,
+            };
         }
 
         private void LoadItemTexture(int slot, string path)
@@ -745,6 +829,7 @@ namespace ForgeConnector
             if (!Directory.Exists(_modSourcesDir))
                 return;
 
+            _watcher?.Dispose();
             _watcher = new FileSystemWatcher(_modSourcesDir)
             {
                 Filter = "*.json",
@@ -754,6 +839,60 @@ namespace ForgeConnector
 
             _watcher.Created += OnJsonEvent;
             _watcher.Changed += OnJsonEvent;
+            Mod.Logger.Info("[ForgeConnector] FileSystemWatcher started on " + _modSourcesDir);
+        }
+
+        /// <summary>
+        /// If ModSources was missing at startup, retry periodically until the directory exists.
+        /// </summary>
+        private void TryStartWatcherIfNeeded()
+        {
+            if (_watcher != null)
+                return;
+
+            if (string.IsNullOrEmpty(_modSourcesDir))
+                return;
+
+            _watcherRetryCooldown++;
+            if (_watcherRetryCooldown < 120)
+                return;
+
+            _watcherRetryCooldown = 0;
+
+            if (!Directory.Exists(_modSourcesDir))
+                return;
+
+            _modSourcesDir = GetModSourcesDir();
+            _triggerPath = Path.Combine(_modSourcesDir, "command_trigger.json");
+            _injectPath = Path.Combine(_modSourcesDir, "forge_inject.json");
+            _heartbeatPath = Path.Combine(_modSourcesDir, "forge_connector_alive.json");
+            _statusPath = Path.Combine(_modSourcesDir, "forge_connector_status.json");
+            WriteHeartbeat();
+            StartWatcher();
+        }
+
+        /// <summary>
+        /// Fallback when FileSystemWatcher misses events (e.g. some network / sync folders).
+        /// </summary>
+        private void PollInjectFileFallback()
+        {
+            _injectPollCooldown++;
+            if (_injectPollCooldown < 90)
+                return;
+
+            _injectPollCooldown = 0;
+
+            if (string.IsNullOrEmpty(_injectPath) || !File.Exists(_injectPath))
+                return;
+
+            try
+            {
+                HandleInjectTrigger();
+            }
+            catch (Exception ex)
+            {
+                Mod.Logger.Error("[ForgeConnector] PollInjectFileFallback: " + ex.Message);
+            }
         }
 
         private void OnJsonEvent(object sender, FileSystemEventArgs e)
@@ -862,7 +1001,7 @@ namespace ForgeConnector
             try
             {
                 string json;
-                if (status == "item_injected" || status == "inject_failed")
+                if (status == "item_injected" || status == "inject_failed" || status == "item_pending")
                 {
                     json = JsonSerializer.Serialize(new
                     {
@@ -885,7 +1024,26 @@ namespace ForgeConnector
                 File.WriteAllText(tmp, json);
                 File.Move(tmp, _statusPath, overwrite: true);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Mod.Logger.Error("[ForgeConnector] WriteStatus failed: " + ex);
+                try
+                {
+                    string fail = JsonSerializer.Serialize(new
+                    {
+                        status = "inject_failed",
+                        message = "Could not write forge_connector_status.json: " + ex.Message,
+                        timestamp = DateTime.UtcNow.ToString("o"),
+                    }, new JsonSerializerOptions { WriteIndented = true });
+                    string fallback = Path.Combine(Path.GetDirectoryName(_statusPath) ?? _modSourcesDir, "forge_connector_status.json");
+                    File.WriteAllText(fallback + ".tmp", fail);
+                    File.Move(fallback + ".tmp", fallback, overwrite: true);
+                }
+                catch (Exception ex2)
+                {
+                    Mod.Logger.Error("[ForgeConnector] WriteStatus recovery failed: " + ex2);
+                }
+            }
         }
 
         // ------------------------------------------------------------------
@@ -894,7 +1052,25 @@ namespace ForgeConnector
 
         private static string GetModSourcesDir()
         {
+            string? env = Environment.GetEnvironmentVariable("FORGE_MOD_SOURCES_DIR");
+            if (!string.IsNullOrWhiteSpace(env))
+                return env.Trim();
+
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                string profile = Environment.GetEnvironmentVariable("USERPROFILE");
+                if (string.IsNullOrEmpty(profile))
+                    profile = home;
+                return Path.Combine(profile, "Documents", "My Games", "Terraria", "tModLoader", "ModSources");
+            }
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                return Path.Combine(home, ".local", "share", "Terraria", "tModLoader", "ModSources");
+            }
+
             return Path.Combine(home, "Library", "Application Support", "Terraria", "tModLoader", "ModSources");
         }
 
@@ -910,6 +1086,7 @@ namespace ForgeConnector
                     loaded_at  = DateTime.UtcNow.ToString("o"),
                     pid        = Environment.ProcessId,
                     version    = "2.0.0",
+                    mod_sources_dir = _modSourcesDir,
                     capabilities = new[] { "reload", "inject" },
                 };
 
