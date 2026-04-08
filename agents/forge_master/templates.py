@@ -50,8 +50,9 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
     {
         public override void SetDefaults()
         {
-            Item.width = 40;
-            Item.height = 40;
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
             Item.useStyle = ItemUseStyleID.Swing;
             Item.useTime = 20;
             Item.useAnimation = 20;
@@ -108,6 +109,7 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
         {
             Item.width = 62;
             Item.height = 32;
+            Item.scale = 1.15f;
             Item.useStyle = ItemUseStyleID.Shoot;
             Item.useTime = 8;
             Item.useAnimation = 8;
@@ -173,8 +175,9 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
 
         public override void SetDefaults()
         {
-            Item.width = 40;
-            Item.height = 40;
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
             Item.useStyle = ItemUseStyleID.Shoot;
             Item.useTime = 25;
             Item.useAnimation = 25;
@@ -213,6 +216,745 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
     }
 }"""
 
+SKY_STRIKE_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.DataStructures;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Sky-strike weapon: projectiles spawn from above the screen and fall
+    // toward the cursor.  Based on the vanilla Star Wrath / Starfury mechanic.
+    // Works for any weapon type (staff, sword, etc.) — adapt SetDefaults to match.
+
+    public class ExampleSkyStrikeStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 25;
+            Item.useAnimation = 25;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 30;
+            Item.knockBack = 4f;
+            Item.mana = 10;
+            Item.noMelee = true;
+
+            // Use a vanilla sky-projectile: StarWrath, Starfury, or LunarFlare
+            Item.shoot = ProjectileID.StarWrath;
+            Item.shootSpeed = 8f;
+
+            Item.value = Item.buyPrice(gold: 1);
+            Item.rare = ItemRarityID.Green;
+            Item.UseSound = SoundID.Item43;
+        }
+
+        // Sky-strike Shoot() override: spawn projectiles high above the player,
+        // aimed downward at the cursor position.
+        public override bool Shoot(Player player, EntitySource_ItemUse_WithAmmo source,
+            Vector2 position, Vector2 velocity, int type, int damage, float knockback)
+        {
+            Vector2 target = Main.screenPosition + new Vector2(Main.mouseX, Main.mouseY);
+            float ceilingLimit = target.Y;
+            if (ceilingLimit > player.Center.Y - 200f)
+                ceilingLimit = player.Center.Y - 200f;
+
+            for (int i = 0; i < 3; i++)
+            {
+                position = player.Center - new Vector2(Main.rand.NextFloat(401) * player.direction, 600f);
+                position.Y -= 100 * i;
+                Vector2 heading = target - position;
+                if (heading.Y < 0f) heading.Y *= -1f;
+                if (heading.Y < 20f) heading.Y = 20f;
+                heading.Normalize();
+                heading *= velocity.Length();
+                heading.Y += Main.rand.Next(-40, 41) * 0.02f;
+                Projectile.NewProjectile(source, position, heading, type,
+                    damage, knockback, player.whoAmI, 0f, ceilingLimit);
+            }
+            return false;  // suppress default projectile spawn
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.FallenStar, 10)
+                .AddIngredient(ItemID.GoldBar, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}"""
+
+HOMING_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Homing weapon: fires a custom ModProjectile that tracks the nearest enemy.
+    // The projectile uses FindClosestNPC() to acquire targets and smoothly
+    // interpolates toward them using an inertia factor.
+
+    public class ExampleHomingStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 25;
+            Item.useAnimation = 25;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 30;
+            Item.knockBack = 4f;
+            Item.mana = 10;
+            Item.noMelee = true;
+
+            Item.shoot = ModContent.ProjectileType<ExampleHomingProjectile>();
+            Item.shootSpeed = 8f;
+
+            Item.value = Item.buyPrice(gold: 1);
+            Item.rare = ItemRarityID.Green;
+            Item.UseSound = SoundID.Item43;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.FallenStar, 10)
+                .AddIngredient(ItemID.GoldBar, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleHomingProjectile : ModProjectile
+    {
+        public override void SetStaticDefaults()
+        {
+            ProjectileID.Sets.TrailCacheLength[Type] = 5;
+            ProjectileID.Sets.TrailingMode[Type] = 0;
+        }
+
+        public override void SetDefaults()
+        {
+            Projectile.width = 16;
+            Projectile.height = 16;
+            Projectile.friendly = true;
+            Projectile.hostile = false;
+            Projectile.DamageType = DamageClass.Magic;
+            Projectile.penetrate = 3;
+            Projectile.timeLeft = 300;
+            Projectile.tileCollide = true;
+            Projectile.ignoreWater = true;
+            Projectile.light = 0.5f;
+        }
+
+        public override void AI()
+        {
+            // Seek the closest enemy within detection radius
+            float maxDetectRadius = 400f;
+            float projSpeed = 8f;
+            NPC closestNPC = FindClosestNPC(maxDetectRadius);
+            if (closestNPC != null)
+            {
+                Vector2 dirToTarget = (closestNPC.Center - Projectile.Center).SafeNormalize(Vector2.UnitX);
+                float inertia = 20f;
+                Projectile.velocity = (Projectile.velocity * (inertia - 1) + dirToTarget * projSpeed) / inertia;
+            }
+
+            Projectile.rotation = Projectile.velocity.ToRotation();
+
+            // Dust trail
+            if (Main.rand.NextBool(3))
+            {
+                Dust.NewDust(Projectile.position, Projectile.width, Projectile.height,
+                    DustID.MagicMirror, Projectile.velocity.X * 0.3f, Projectile.velocity.Y * 0.3f);
+            }
+        }
+
+        private NPC FindClosestNPC(float maxDetectDistance)
+        {
+            NPC closestNPC = null;
+            float sqrMaxDetectDistance = maxDetectDistance * maxDetectDistance;
+            for (int i = 0; i < Main.maxNPCs; i++)
+            {
+                NPC target = Main.npc[i];
+                if (target.CanBeChasedBy())
+                {
+                    float sqrDist = Vector2.DistanceSquared(target.Center, Projectile.Center);
+                    if (sqrDist < sqrMaxDetectDistance)
+                    {
+                        sqrMaxDetectDistance = sqrDist;
+                        closestNPC = target;
+                    }
+                }
+            }
+            return closestNPC;
+        }
+
+        public override void OnKill(int timeLeft)
+        {
+            for (int k = 0; k < 8; k++)
+            {
+                Dust.NewDust(Projectile.position + Projectile.velocity, Projectile.width, Projectile.height,
+                    DustID.MagicMirror, Projectile.oldVelocity.X * 0.5f, Projectile.oldVelocity.Y * 0.5f);
+            }
+        }
+
+        public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone)
+        {
+            Projectile.velocity *= 0.8f;
+        }
+    }
+}"""
+
+BOOMERANG_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Boomerang weapon: uses vanilla ProjAIStyleID.Boomerang (aiStyle 3)
+    // which handles outward travel, deceleration, and return automatically.
+    // The item hides its held sprite — the projectile IS the visible weapon.
+
+    public class ExampleBoomerang : ModItem
+    {
+        public override void SetDefaults()
+        {
+            Item.width = 30;
+            Item.height = 30;
+            Item.scale = 1.1f;
+            Item.useStyle = ItemUseStyleID.Swing;
+            Item.useTime = 20;
+            Item.useAnimation = 20;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Melee;
+            Item.damage = 25;
+            Item.knockBack = 5f;
+            Item.noMelee = true;
+            Item.noUseGraphic = true;  // hide held sprite — projectile IS the weapon
+
+            Item.shoot = ModContent.ProjectileType<ExampleBoomerangProjectile>();
+            Item.shootSpeed = 12f;
+
+            Item.value = Item.buyPrice(gold: 1);
+            Item.rare = ItemRarityID.Green;
+            Item.UseSound = SoundID.Item1;
+        }
+
+        // Limit to one active boomerang at a time
+        public override bool CanUseItem(Player player)
+        {
+            return player.ownedProjectileCounts[Item.shoot] < 1;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.IronBar, 8)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleBoomerangProjectile : ModProjectile
+    {
+        public override void SetDefaults()
+        {
+            Projectile.width = 22;
+            Projectile.height = 22;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Melee;
+            Projectile.penetrate = -1;  // infinite — passes through enemies both ways
+            Projectile.aiStyle = ProjAIStyleID.Boomerang;  // vanilla boomerang behavior
+        }
+
+        public override void AI()
+        {
+            // Spin the sprite (vanilla AI handles movement)
+            Projectile.rotation += 0.4f * Projectile.direction;
+        }
+    }
+}"""
+
+ORBIT_TEMPLATE = """\
+using System;
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Orbit weapon: spawns projectiles that circle the player, damaging
+    // enemies they contact.
+
+    public class ExampleOrbitStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 30;
+            Item.useAnimation = 30;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 25;
+            Item.knockBack = 3f;
+            Item.mana = 12;
+            Item.noMelee = true;
+
+            Item.shoot = ModContent.ProjectileType<ExampleOrbitProjectile>();
+            Item.shootSpeed = 0f;  // zero — position is computed, not velocity-driven
+
+            Item.value = Item.buyPrice(gold: 1);
+            Item.rare = ItemRarityID.Green;
+            Item.UseSound = SoundID.Item43;
+        }
+
+        // Cap active orbit projectiles to prevent stacking exploitation
+        public override bool CanUseItem(Player player)
+        {
+            return player.ownedProjectileCounts[Item.shoot] < 3;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.FallenStar, 10)
+                .AddIngredient(ItemID.GoldBar, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleOrbitProjectile : ModProjectile
+    {
+        public override void SetDefaults()
+        {
+            Projectile.width = 16;
+            Projectile.height = 16;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Magic;
+            Projectile.penetrate = -1;
+            Projectile.tileCollide = false;
+            Projectile.timeLeft = 300;  // 5 seconds
+            Projectile.light = 0.4f;
+        }
+
+        public override void AI()
+        {
+            Player owner = Main.player[Projectile.owner];
+            if (!owner.active || owner.dead)
+            {
+                Projectile.Kill();
+                return;
+            }
+
+            // Increment orbit angle (radians per frame)
+            Projectile.ai[0] += 0.08f;
+            float radius = 100f;
+
+            // Position on circle around owner
+            Projectile.Center = owner.Center + new Vector2(
+                (float)Math.Cos(Projectile.ai[0]) * radius,
+                (float)Math.Sin(Projectile.ai[0]) * radius
+            );
+
+            // Zero velocity — position is computed, not physics-driven
+            Projectile.velocity = Vector2.Zero;
+
+            // Face tangent direction for visual rotation
+            Projectile.rotation = Projectile.ai[0] + MathHelper.PiOver2;
+
+            // Dust trail on the orbit path
+            if (Main.rand.NextBool(3))
+            {
+                Dust.NewDust(Projectile.position, Projectile.width, Projectile.height,
+                    DustID.MagicMirror);
+            }
+        }
+    }
+}"""
+
+EXPLOSION_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.Audio;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Explosive weapon: fires a projectile that explodes on impact,
+    // dealing AoE damage via Projectile.Resize() in OnKill.
+
+    public class ExampleExplosiveLauncher : ModItem
+    {
+        public override void SetDefaults()
+        {
+            Item.width = 50;
+            Item.height = 20;
+            Item.scale = 1.15f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 30;
+            Item.useAnimation = 30;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Ranged;
+            Item.damage = 40;
+            Item.knockBack = 6f;
+            Item.noMelee = true;
+
+            Item.shoot = ModContent.ProjectileType<ExampleExplosiveProjectile>();
+            Item.shootSpeed = 10f;
+
+            Item.value = Item.buyPrice(gold: 2);
+            Item.rare = ItemRarityID.Orange;
+            Item.UseSound = SoundID.Item11;
+        }
+
+        public override Vector2? HoldoutOffset()
+        {
+            return new Vector2(2f, -2f);
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.HellstoneBar, 15)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleExplosiveProjectile : ModProjectile
+    {
+        public override void SetStaticDefaults()
+        {
+            ProjectileID.Sets.Explosive[Type] = true;  // mark as explosive type
+        }
+
+        public override void SetDefaults()
+        {
+            Projectile.width = 16;
+            Projectile.height = 16;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Ranged;
+            Projectile.penetrate = -1;  // hits all enemies in blast radius via Resize
+            Projectile.tileCollide = true;
+            Projectile.timeLeft = 180;
+        }
+
+        public override void AI()
+        {
+            // Apply gravity
+            Projectile.velocity.Y += 0.2f;
+            Projectile.rotation = Projectile.velocity.ToRotation();
+
+            // Smoke trail
+            if (Main.rand.NextBool(2))
+            {
+                Dust.NewDust(Projectile.position, Projectile.width, Projectile.height,
+                    DustID.Smoke);
+            }
+        }
+
+        public override void OnKill(int timeLeft)
+        {
+            // Expand hitbox for AoE — the 1.4.4 way to deal explosion damage
+            Projectile.Resize(128, 128);
+
+            // Explosion sound
+            SoundEngine.PlaySound(SoundID.Item14, Projectile.position);
+
+            // Visual: fire burst in a circle
+            for (int i = 0; i < 30; i++)
+            {
+                Vector2 speed = Main.rand.NextVector2CircularEdge(8f, 8f);
+                Dust.NewDustPerfect(Projectile.Center, DustID.Torch, speed, Scale: 2f);
+            }
+            // Visual: smoke ring
+            for (int i = 0; i < 20; i++)
+            {
+                Vector2 speed = Main.rand.NextVector2CircularEdge(5f, 5f);
+                Dust.NewDustPerfect(Projectile.Center, DustID.Smoke, speed, Scale: 1.5f);
+            }
+        }
+
+        public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone)
+        {
+            // Explode on first enemy contact
+            Projectile.Kill();
+        }
+    }
+}"""
+
+PIERCE_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Piercing beam weapon: fires a fast projectile that passes through
+    // all enemies and tiles, using local NPC immunity to prevent damage stacking.
+
+    public class ExamplePierceStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 20;
+            Item.useAnimation = 20;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 35;
+            Item.knockBack = 2f;
+            Item.mana = 8;
+            Item.noMelee = true;
+
+            Item.shoot = ModContent.ProjectileType<ExamplePierceBeam>();
+            Item.shootSpeed = 16f;  // fast beam
+
+            Item.value = Item.buyPrice(gold: 2);
+            Item.rare = ItemRarityID.Orange;
+            Item.UseSound = SoundID.Item43;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.FallenStar, 10)
+                .AddIngredient(ItemID.GoldBar, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExamplePierceBeam : ModProjectile
+    {
+        public override void SetDefaults()
+        {
+            Projectile.width = 10;
+            Projectile.height = 10;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Magic;
+            Projectile.penetrate = -1;      // infinite pierce
+            Projectile.tileCollide = false;  // passes through tiles (beam)
+            Projectile.timeLeft = 120;
+            Projectile.light = 0.8f;
+            Projectile.extraUpdates = 2;     // moves 3x per frame for smooth fast travel
+            Projectile.usesLocalNPCImmunity = true;  // per-NPC hit cooldown
+            Projectile.localNPCHitCooldown = 10;     // frames between hits on same NPC
+            Projectile.ignoreWater = true;
+        }
+
+        public override void AI()
+        {
+            Projectile.rotation = Projectile.velocity.ToRotation();
+
+            // Bright dust trail for beam visual
+            for (int i = 0; i < 2; i++)
+            {
+                Dust dust = Dust.NewDustDirect(Projectile.position, Projectile.width,
+                    Projectile.height, DustID.MagicMirror);
+                dust.noGravity = true;
+                dust.scale = 1.2f;
+                dust.velocity *= 0.3f;
+            }
+        }
+    }
+}"""
+
+CHAIN_LIGHTNING_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Chain lightning weapon: projectile jumps between enemies on hit,
+    // dealing reduced damage with each chain.  ai[0] tracks chain depth.
+
+    public class ExampleChainLightningStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useTime = 25;
+            Item.useAnimation = 25;
+            Item.autoReuse = true;
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 28;
+            Item.knockBack = 3f;
+            Item.mana = 10;
+            Item.noMelee = true;
+
+            Item.shoot = ModContent.ProjectileType<ExampleChainLightningBolt>();
+            Item.shootSpeed = 12f;
+
+            Item.value = Item.buyPrice(gold: 2);
+            Item.rare = ItemRarityID.Orange;
+            Item.UseSound = SoundID.Item43;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.FallenStar, 10)
+                .AddIngredient(ItemID.GoldBar, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleChainLightningBolt : ModProjectile
+    {
+        public override void SetDefaults()
+        {
+            Projectile.width = 10;
+            Projectile.height = 10;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Magic;
+            Projectile.penetrate = 2;   // hits 2 enemies per bolt
+            Projectile.tileCollide = true;
+            Projectile.timeLeft = 120;
+            Projectile.light = 0.6f;
+        }
+
+        public override void AI()
+        {
+            // Stop chaining after 3 jumps
+            if (Projectile.ai[0] >= 3f)
+            {
+                Projectile.penetrate = 1;
+            }
+
+            Projectile.rotation = Projectile.velocity.ToRotation();
+
+            // Electric dust trail
+            if (Main.rand.NextBool(2))
+            {
+                Dust dust = Dust.NewDustDirect(Projectile.position, Projectile.width,
+                    Projectile.height, DustID.Electric);
+                dust.noGravity = true;
+                dust.scale = 1.5f;
+            }
+        }
+
+        // Chain to nearest enemy on hit (multiplayer-safe: only owner spawns)
+        public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone)
+        {
+            if (Main.myPlayer != Projectile.owner) return;
+            if (Projectile.ai[0] >= 3f) return;  // max chain depth reached
+
+            float maxDist = 300f;
+            NPC closest = null;
+            float closestDistSq = maxDist * maxDist;
+
+            for (int i = 0; i < Main.maxNPCs; i++)
+            {
+                NPC npc = Main.npc[i];
+                if (npc.CanBeChasedBy() && npc.whoAmI != target.whoAmI)
+                {
+                    float distSq = Vector2.DistanceSquared(npc.Center, target.Center);
+                    if (distSq < closestDistSq)
+                    {
+                        closestDistSq = distSq;
+                        closest = npc;
+                    }
+                }
+            }
+
+            if (closest != null)
+            {
+                Vector2 dir = (closest.Center - target.Center).SafeNormalize(Vector2.UnitX) * 12f;
+                // Chain depth increments via ai[0]; damage reduces per chain
+                Projectile.NewProjectile(
+                    Projectile.GetSource_FromThis(), target.Center, dir,
+                    Projectile.type, (int)(Projectile.damage * 0.8f),
+                    Projectile.knockBack * 0.5f, Projectile.owner,
+                    ai0: Projectile.ai[0] + 1f);
+            }
+        }
+    }
+}"""
+
 BOW_TEMPLATE = """\
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -228,6 +970,7 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
         {
             Item.width = 24;
             Item.height = 56;
+            Item.scale = 1.15f;
             Item.useStyle = ItemUseStyleID.Shoot;
             Item.useTime = 22;
             Item.useAnimation = 22;
@@ -300,8 +1043,9 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
 
         public override void SetDefaults()
         {
-            Item.width = 32;
-            Item.height = 32;
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.2f;
             Item.useStyle = ItemUseStyleID.Swing;
             Item.useTime = 36;
             Item.useAnimation = 36;
@@ -438,8 +1182,9 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
     {
         public override void SetDefaults()
         {
-            Item.width = 28;
-            Item.height = 28;
+            Item.width = 48;
+            Item.height = 48;
+            Item.scale = 1.1f;
 
             // DefaultToWhip(projectileType, damage, knockBack, useTime)
             Item.DefaultToWhip(ModContent.ProjectileType<ExampleWhipProjectile>(), 20, 2f, 26);
@@ -508,6 +1253,7 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
         {
             Item.width = 62;
             Item.height = 32;
+            Item.scale = 1.15f;
             Item.useStyle = ItemUseStyleID.Shoot;
             Item.useTime = 12;
             Item.useAnimation = 12;
@@ -625,14 +1371,28 @@ REFERENCE_SNIPPETS: dict[str, str] = {
 }
 
 
-def get_reference_snippet(sub_type: str, custom_projectile: bool = False) -> str:
+def get_reference_snippet(sub_type: str, custom_projectile: bool = False, shot_style: str = "direct") -> str:
     """Return the best-matching reference snippet for a given sub-type.
 
     If custom_projectile is True, returns the custom projectile template
     showing how to create both a ModItem and ModProjectile in the same file.
+    If shot_style is "sky_strike", returns the sky-strike template showing the
+    Starfury/Star Wrath Shoot() override pattern.
     """
     if custom_projectile:
         return CUSTOM_PROJECTILE_TEMPLATE
+    _STYLE_TEMPLATES = {
+        "sky_strike": SKY_STRIKE_TEMPLATE,
+        "homing": HOMING_TEMPLATE,
+        "boomerang": BOOMERANG_TEMPLATE,
+        "orbit": ORBIT_TEMPLATE,
+        "explosion": EXPLOSION_TEMPLATE,
+        "pierce": PIERCE_TEMPLATE,
+        "chain_lightning": CHAIN_LIGHTNING_TEMPLATE,
+    }
+    style_tmpl = _STYLE_TEMPLATES.get(shot_style)
+    if style_tmpl:
+        return style_tmpl
     return REFERENCE_SNIPPETS.get(sub_type, SWORD_TEMPLATE)
 
 

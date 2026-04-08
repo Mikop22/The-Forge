@@ -44,6 +44,22 @@ class should:
   * Have appropriate width/height (typically 16x16 for projectiles)
   * Set `Projectile.friendly = true` and appropriate `DamageType`
   * The item's `Item.shoot` should reference it via `ModContent.ProjectileType<ClassName>()`
+- If the manifest has `mechanics.shot_style` set to a non-"direct" value, \
+follow the reference example pattern exactly. Specific rules per style:
+  * "sky_strike": override Shoot() to spawn projectiles from above. Do NOT \
+generate a custom ModProjectile — use the vanilla ProjectileID from the manifest.
+  * "homing": generate both ModItem and ModProjectile. The ModProjectile AI() \
+must scan for the nearest NPC and smoothly steer toward it.
+  * "boomerang": generate both ModItem and ModProjectile. The item must set \
+noUseGraphic=true. The projectile AI() has two phases: outward travel then return.
+  * "orbit": generate both ModItem and ModProjectile. The projectile must \
+orbit the player using sin/cos positioning — set velocity to zero, compute Center.
+  * "explosion": generate both ModItem and ModProjectile. The projectile must \
+call Projectile.Resize() in OnKill() for AoE damage with dust/sound effects.
+  * "pierce": generate both ModItem and ModProjectile. The projectile must use \
+penetrate=-1, tileCollide=false, usesLocalNPCImmunity=true, extraUpdates for speed.
+  * "chain_lightning": generate both ModItem and ModProjectile. The projectile \
+OnHitNPC must spawn a new projectile aimed at the nearest other NPC.
 
 ## Reference Example (correct 1.4.4 pattern for this weapon type)
 ```csharp

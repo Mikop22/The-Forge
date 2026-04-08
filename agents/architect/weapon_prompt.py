@@ -32,6 +32,19 @@ CRITICAL — structured enum fields:
   (e.g. ProjectileID.BallofFire, ProjectileID.FrostBoltSword) or null.
   Do NOT invent names. If unsure, set to null.
 - `mechanics.ammo_id` must be a valid AmmoID.* constant or null.
+- `mechanics.shot_style` controls projectile behavior. Must be one of:
+  "direct" (default — straight-line fire),
+  "sky_strike" (projectiles rain from sky — Starfury/Star Wrath),
+  "homing" (projectiles track nearest enemy),
+  "boomerang" (thrown weapon returns to player),
+  "orbit" (projectiles circle the player),
+  "explosion" (projectile explodes on impact for AoE damage),
+  "pierce" (beam passes through all enemies and tiles),
+  "chain_lightning" (projectile jumps between enemies on hit).
+  When shot_style is "sky_strike", set shoot_projectile to ProjectileID.StarWrath
+  or ProjectileID.Starfury. For other non-direct styles, set shoot_projectile
+  to null AND set custom_projectile to false — the shot_style template already
+  includes the appropriate ModProjectile class.
 
 Keep crafting data empty unless the user explicitly describes a recipe.
 """

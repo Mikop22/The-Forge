@@ -48,7 +48,7 @@ class CoderAgent:
         # Code generation: prompt → LLM → structured Pydantic output
         self._gen_chain = (
             build_codegen_prompt()
-            | self._llm.with_structured_output(CSharpOutput)
+            | self._llm.with_structured_output(CSharpOutput, strict=True)
         )
 
         # Repair: prompt → LLM → raw string (corrected C# source)
@@ -82,7 +82,8 @@ class CoderAgent:
         damage_class = DAMAGE_CLASS_MAP.get(sub_type, "DamageClass.Melee")
         use_style = USE_STYLE_MAP.get(sub_type, "ItemUseStyleID.Swing")
         custom_projectile = parsed.mechanics.custom_projectile
-        reference_snippet = get_reference_snippet(sub_type, custom_projectile)
+        shot_style = parsed.mechanics.shot_style
+        reference_snippet = get_reference_snippet(sub_type, custom_projectile, shot_style=shot_style)
 
         # 1. Invoke LLM for C# generation
         llm_result: CSharpOutput = self._gen_chain.invoke({

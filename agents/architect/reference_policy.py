@@ -109,7 +109,7 @@ class HybridReferenceApprover:
 
     def __post_init__(self) -> None:
         self._llm = ChatOpenAI(model=self.model_name, timeout=60).with_structured_output(
-            ReferenceApprovalOutput
+            ReferenceApprovalOutput, strict=True
         )
 
     def approve(

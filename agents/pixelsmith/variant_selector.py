@@ -10,8 +10,14 @@ from io import BytesIO
 from PIL import Image
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+class _VariantSelection(BaseModel):
+    index: int = Field(description="1-based index of the best candidate (e.g. 1, 2, or 3)")
+
 
 _SELECTOR_SYSTEM = """\
 You are selecting the best pixel art sprite from {n} candidates.
@@ -29,8 +35,7 @@ Consider:
 
 All candidates should have similar colors. Focus on SHAPE quality.
 
-Reply with ONLY a single digit (1-{n}) — the number of the best candidate. \
-Nothing else."""
+Return the number of the best candidate (1 through {n}) in the `index` field."""
 
 
 def _image_to_b64(img: Image.Image) -> str:
@@ -73,22 +78,18 @@ def select_best_variant(
         content.append({"type": "text", "text": f"Candidate {i}:"})
         content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"}})
 
-    llm = ChatOpenAI(model=model, timeout=60)
+    llm = ChatOpenAI(model=model, timeout=60).with_structured_output(
+        _VariantSelection, strict=True
+    )
     messages = [
         SystemMessage(content=_SELECTOR_SYSTEM.format(n=n)),
         HumanMessage(content=content),
     ]
 
-    result = llm.invoke(messages)
-    answer = result.content.strip()
+    result: _VariantSelection = llm.invoke(messages)
+    if 1 <= result.index <= n:
+        logger.info("LLM selected candidate %d of %d", result.index, n)
+        return result.index - 1
 
-    # Parse the digit
-    for char in answer:
-        if char.isdigit():
-            choice = int(char)
-            if 1 <= choice <= n:
-                logger.info("LLM selected candidate %d of %d", choice, n)
-                return choice - 1
-
-    logger.warning("Could not parse LLM selection '%s', defaulting to candidate 1", answer)
+    logger.warning("LLM returned out-of-range index %d (n=%d), defaulting to candidate 1", result.index, n)
     return 0

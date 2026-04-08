@@ -45,7 +45,12 @@ class ArchitectAgent:
 
     def __init__(self, model_name: str = "gpt-5.4") -> None:
         self._llm = ChatOpenAI(model=model_name, timeout=120)
-        self._structured_llm = self._llm.with_structured_output(LLMItemOutput)
+        # strict=True: OpenAI SDK internally calls to_strict_json_schema(), which moves all
+        # fields into `required` and adds additionalProperties:false — so optional fields with
+        # defaults are handled correctly at the SDK level, not by LangChain. If LangChain's
+        # dispatch path changes in future (e.g. stops passing the Pydantic class directly),
+        # verify the generated schema still satisfies OpenAI strict mode requirements.
+        self._structured_llm = self._llm.with_structured_output(LLMItemOutput, strict=True)
         self._reference_policy = ReferencePolicy(
             finder=BrowserReferenceFinder(),
             approver=HybridReferenceApprover(model_name=model_name),

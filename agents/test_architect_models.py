@@ -1,13 +1,23 @@
 import unittest
+from typing import get_args
+
+import pytest
 
 from architect.models import (
     AMMO_ID_CHOICES,
+    AMMO_ID_TUPLE,
+    AmmoIDLiteral,
     BUFF_ID_CHOICES,
+    BUFF_ID_TUPLE,
+    BuffIDLiteral,
     LLMMechanics,
     Mechanics,
+    SHOT_STYLE_CHOICES,
     VALID_AMMO_IDS,
     VALID_BUFF_IDS,
+    _normalize_buff_id,
 )
+from forge_master.models import ManifestMechanics
 
 
 class IdRegistryInvariantTests(unittest.TestCase):
@@ -18,6 +28,17 @@ class IdRegistryInvariantTests(unittest.TestCase):
     def test_ammo_ids_single_source(self) -> None:
         self.assertEqual(set(AMMO_ID_CHOICES), set(VALID_AMMO_IDS))
         self.assertEqual(len(AMMO_ID_CHOICES), len(VALID_AMMO_IDS))
+
+    def test_buff_literal_matches_tuple(self) -> None:
+        self.assertEqual(set(get_args(BuffIDLiteral)), set(BUFF_ID_TUPLE))
+
+    def test_ammo_literal_matches_tuple(self) -> None:
+        self.assertEqual(set(get_args(AmmoIDLiteral)), set(AMMO_ID_TUPLE))
+
+    def test_shot_style_literal_matches_across_models(self) -> None:
+        """shot_style Literal in forge_master must match architect's SHOT_STYLE_CHOICES."""
+        fm_choices = set(get_args(ManifestMechanics.model_fields["shot_style"].annotation))
+        self.assertEqual(fm_choices, set(SHOT_STYLE_CHOICES))
 
 
 class BuffNormalizationTests(unittest.TestCase):
@@ -117,6 +138,86 @@ class MechanicsBuffNormalizationTests(unittest.TestCase):
     def test_invalid_buffid_string_becomes_none(self) -> None:
         m = self._base(buff_id="BuffID.Venom")
         self.assertIsNone(m.buff_id)
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # Canonical forms — unchanged
+    ("BuffID.OnFire",       "BuffID.OnFire"),
+    ("BuffID.Frostburn",    "BuffID.Frostburn"),
+    # Exact alias — existing coverage
+    ("On Fire!",            "BuffID.OnFire"),
+    ("On Fire",             "BuffID.OnFire"),
+    # Case variants — newly hardened
+    ("on fire!",            "BuffID.OnFire"),
+    ("ON FIRE!",            "BuffID.OnFire"),
+    ("on Fire",             "BuffID.OnFire"),
+    ("POISONED",            "BuffID.Poisoned"),
+    ("poisoned",            "BuffID.Poisoned"),
+    ("SLIMED",              "BuffID.Slimed"),
+    ("well fed",            "BuffID.WellFed"),
+    ("WELL FED",            "BuffID.WellFed"),
+    ("cursed inferno",      "BuffID.CursedInferno"),
+    ("CURSED INFERNO",      "BuffID.CursedInferno"),
+    ("shadow flame",        "BuffID.ShadowFlame"),
+    ("shadowflame",         "BuffID.ShadowFlame"),
+    ("SHADOWFLAME",         "BuffID.ShadowFlame"),
+    ("frostburn",           "BuffID.Frostburn"),
+    ("FROSTBURN",           "BuffID.Frostburn"),
+    # Completely unrecognised → None (no crash)
+    ("completely_bogus",    None),
+    ("BuffID.Chilled",      None),
+])
+def test_normalize_buff_id_variants(raw: str, expected):
+    assert _normalize_buff_id(raw) == expected
+
+
+class ShotStyleTests(unittest.TestCase):
+    """shot_style field on LLMMechanics and Mechanics."""
+
+    def test_llm_mechanics_defaults_to_direct(self) -> None:
+        m = LLMMechanics()
+        self.assertEqual(m.shot_style, "direct")
+
+    def test_llm_mechanics_accepts_sky_strike(self) -> None:
+        m = LLMMechanics(shot_style="sky_strike")
+        self.assertEqual(m.shot_style, "sky_strike")
+
+    def test_mechanics_defaults_to_direct(self) -> None:
+        m = Mechanics(
+            crafting_material="ItemID.Wood",
+            crafting_cost=5,
+            crafting_tile="TileID.WorkBenches",
+        )
+        self.assertEqual(m.shot_style, "direct")
+
+    def test_mechanics_accepts_sky_strike(self) -> None:
+        m = Mechanics(
+            crafting_material="ItemID.Wood",
+            crafting_cost=5,
+            crafting_tile="TileID.WorkBenches",
+            shot_style="sky_strike",
+        )
+        self.assertEqual(m.shot_style, "sky_strike")
+
+    def test_llm_mechanics_accepts_all_styles(self) -> None:
+        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning"):
+            m = LLMMechanics(shot_style=style)
+            self.assertEqual(m.shot_style, style)
+
+    def test_mechanics_accepts_all_styles(self) -> None:
+        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning"):
+            m = Mechanics(
+                crafting_material="ItemID.Wood",
+                crafting_cost=5,
+                crafting_tile="TileID.WorkBenches",
+                shot_style=style,
+            )
+            self.assertEqual(m.shot_style, style)
+
+    def test_llm_mechanics_rejects_invalid_shot_style(self) -> None:
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            LLMMechanics(shot_style="orbital")
 
 
 if __name__ == "__main__":

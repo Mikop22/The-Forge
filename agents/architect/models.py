@@ -67,7 +67,18 @@ BUFF_ID_TUPLE: tuple[str, ...] = (
 )
 VALID_BUFF_IDS: frozenset[str] = frozenset(BUFF_ID_TUPLE)
 BUFF_ID_CHOICES: tuple[str, ...] = tuple(sorted(BUFF_ID_TUPLE))
-BuffIDLiteral = Literal[*BUFF_ID_TUPLE]
+# Explicit Literal (Python 3.9 cannot use Literal[*tuple] — requires 3.11+)
+BuffIDLiteral = Literal[
+    "BuffID.CursedInferno",
+    "BuffID.Frostburn",
+    "BuffID.ManaSickness",
+    "BuffID.OnFire",
+    "BuffID.Poisoned",
+    "BuffID.ShadowFlame",
+    "BuffID.Slimed",
+    "BuffID.WellFed",
+    "BuffID.Weak",
+]
 
 # --- Ammo IDs: same pattern. ---
 AMMO_ID_TUPLE: tuple[str, ...] = (
@@ -83,7 +94,27 @@ AMMO_ID_TUPLE: tuple[str, ...] = (
 )
 VALID_AMMO_IDS: frozenset[str] = frozenset(AMMO_ID_TUPLE)
 AMMO_ID_CHOICES: tuple[str, ...] = tuple(sorted(AMMO_ID_TUPLE))
-AmmoIDLiteral = Literal[*AMMO_ID_TUPLE]
+AmmoIDLiteral = Literal[
+    "AmmoID.Arrow",
+    "AmmoID.Bullet",
+    "AmmoID.Coin",
+    "AmmoID.Dart",
+    "AmmoID.Flare",
+    "AmmoID.Gel",
+    "AmmoID.Rocket",
+    "AmmoID.Sand",
+    "AmmoID.Snowball",
+]
+
+# --- Shot-style choices: single source of truth for all models. ---
+SHOT_STYLE_CHOICES: tuple[str, ...] = (
+    "direct", "sky_strike", "homing", "boomerang",
+    "orbit", "explosion", "pierce", "chain_lightning",
+)
+ShotStyleLiteral = Literal[
+    "direct", "sky_strike", "homing", "boomerang",
+    "orbit", "explosion", "pierce", "chain_lightning",
+]
 
 # Build lookup tables for bare-name -> prefixed-name normalization.
 _BARE_BUFF_LOOKUP = {v.removeprefix("BuffID."): v for v in VALID_BUFF_IDS}
@@ -96,11 +127,20 @@ _BUFF_DISPLAY_ALIASES: dict[str, str] = {
     "OnFire!":           "BuffID.OnFire",
     "Cursed Inferno":    "BuffID.CursedInferno",
     "Shadow Flame":      "BuffID.ShadowFlame",
+    "Shadowflame":       "BuffID.ShadowFlame",
     "Mana Sickness":     "BuffID.ManaSickness",
     "Well Fed":          "BuffID.WellFed",
+    "WellFed":           "BuffID.WellFed",
     "Frost Burn":        "BuffID.Frostburn",
+    "Frostburn":         "BuffID.Frostburn",
+    "Slimed":            "BuffID.Slimed",
+    "Poisoned":          "BuffID.Poisoned",
     "Weak":              "BuffID.Weak",
     "Weakness":          "BuffID.Weak",
+}
+# Pre-lowercased for case-insensitive lookup without repeated .lower() calls at runtime.
+_BUFF_DISPLAY_ALIASES_LOWER: dict[str, str] = {
+    k.lower(): v for k, v in _BUFF_DISPLAY_ALIASES.items()
 }
 
 
@@ -165,6 +205,9 @@ def _normalize_buff_id(value: str) -> str | None:
         return s
     if s in _BUFF_DISPLAY_ALIASES:
         return _BUFF_DISPLAY_ALIASES[s]
+    ci = _BUFF_DISPLAY_ALIASES_LOWER.get(s.lower())
+    if ci is not None:
+        return ci
     if s in _BARE_BUFF_LOOKUP:
         return _BARE_BUFF_LOOKUP[s]
     extracted = _extract_buff_id_from_text(s)
@@ -328,12 +371,12 @@ class LLMStats(BaseModel):
 class LLMVisuals(BaseModel):
     color_palette: list[str] = Field(default_factory=list)
     description: str = ""
-    icon_size: list[int] = Field(default=[32, 32])
+    icon_size: list[int] = Field(default=[48, 48])
 
     @field_validator("icon_size", mode="before")
     @classmethod
     def clamp_icon_size(cls, v):
-        return _clamp_icon_size(v, lo=32, hi=64, default=[32, 32])
+        return _clamp_icon_size(v, lo=40, hi=64, default=[48, 48])
 
 
 class ProjectileVisuals(BaseModel):
@@ -360,6 +403,7 @@ class LLMMechanics(BaseModel):
     buff_id: Optional[BuffIDLiteral] = None
     ammo_id: Optional[AmmoIDLiteral] = None
     custom_projectile: bool = False
+    shot_style: ShotStyleLiteral = "direct"
     crafting_material: Optional[str] = None
     crafting_cost: Optional[int] = None
     crafting_tile: Optional[str] = None
@@ -480,7 +524,7 @@ class Stats(BaseModel):
 class Visuals(BaseModel):
     color_palette: list[str] = Field(default_factory=list)
     description: str = ""
-    icon_size: list[int] = Field(default=[32, 32])
+    icon_size: list[int] = Field(default=[48, 48])
 
     @field_validator("color_palette", mode="before")
     @classmethod
@@ -496,7 +540,7 @@ class Visuals(BaseModel):
     @field_validator("icon_size", mode="before")
     @classmethod
     def clamp_icon_size(cls, v):
-        return _clamp_icon_size(v, lo=32, hi=64, default=[32, 32])
+        return _clamp_icon_size(v, lo=40, hi=64, default=[48, 48])
 
 
 class Mechanics(BaseModel):
@@ -505,6 +549,7 @@ class Mechanics(BaseModel):
     buff_id: Optional[BuffIDLiteral] = None
     ammo_id: Optional[AmmoIDLiteral] = None
     custom_projectile: bool = False
+    shot_style: ShotStyleLiteral = "direct"
     crafting_material: str
     crafting_cost: int
     crafting_tile: str

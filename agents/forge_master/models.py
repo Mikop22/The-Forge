@@ -14,6 +14,15 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 try:
+    from architect.models import ShotStyleLiteral
+except ImportError:
+    from pathlib import Path as _Path2
+    _parent2 = str(_Path2(__file__).resolve().parent.parent)
+    if _parent2 not in sys.path:
+        sys.path.insert(0, _parent2)
+    from architect.models import ShotStyleLiteral
+
+try:
     from utils import to_pascal_case as _to_pascal_case
 except ImportError:
     from pathlib import Path as _Path
@@ -40,6 +49,7 @@ class ManifestMechanics(BaseModel):
     shoot_projectile: Optional[str] = None
     on_hit_buff: Optional[str] = None
     custom_projectile: bool = False
+    shot_style: ShotStyleLiteral = "direct"
     crafting_material: str
     crafting_cost: int
     crafting_tile: str

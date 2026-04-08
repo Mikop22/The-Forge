@@ -77,3 +77,91 @@ System.IO.IOException: The process cannot access the file
     assert len(errors) >= 1
     assert errors[0].code == "TML003"
     assert "close tmodloader" in errors[0].message.lower()
+
+
+def test_parse_errors_tmod_lock_without_tml_line() -> None:
+    """IOException on .tmod still classifies as packaging failure when no TML### line."""
+    from gatekeeper.gatekeeper import Integrator
+
+    log = """\
+Compilation finished with 0 errors and 0 warnings
+Packaging: ForgeGeneratedMod
+System.IO.IOException: The process cannot access the file '/Mods/ForgeGeneratedMod.tmod' because it is being used by another process.
+"""
+    errors = Integrator._parse_errors(log)
+    assert any(e.code == "TML_LOCK" for e in errors)
+    assert Integrator._is_packaging_only_failure(errors)
+
+
+def test_tml003_fails_fast_without_coder_repair() -> None:
+    """Packaging locks must not trigger CoderAgent.fix_code (LLM cannot fix a locked file)."""
+    from gatekeeper.gatekeeper import Integrator, CompileResult
+
+    tml_log = """\
+Compiling ForgeGeneratedMod.dll
+Compilation finished with 0 errors and 0 warnings
+tModLoader: Mod Build error TML003: Please close tModLoader or disable the mod in-game to build mods directly.
+"""
+    coder = mock.Mock()
+    integ = Integrator(coder=coder)
+    with mock.patch.object(integ, "_run_tmod_build", return_value=CompileResult(False, tml_log)):
+        with mock.patch.object(integ, "_stage_files"):
+            with mock.patch.object(integ, "_write_status"):
+                out = integ.build_and_verify(
+                    {
+                        "status": "success",
+                        "cs_code": "public class DemoSword : ModItem { }",
+                        "hjson_code": "",
+                    },
+                )
+    assert out["status"] == "error"
+    assert out["errors"][0]["code"] == "TML003"
+    em = out["error_message"].lower()
+    assert "reload" in em and "close tmodloader" in em
+    coder.fix_code.assert_not_called()
+
+
+def test_cs_error_not_treated_as_packaging_only() -> None:
+    """Roslyn failures must keep the repair path — never classify as packaging-only."""
+    from gatekeeper.gatekeeper import Integrator, RoslynError
+
+    errors = [
+        RoslynError(code="CS0103", message="missing name", line=1, file="Item.cs"),
+        RoslynError(code="TML003", message="ignored for this check", line=None, file=None),
+    ]
+    assert not Integrator._is_packaging_only_failure(errors)
+
+
+def test_ensure_mod_entry_class_writes_when_absent(tmp_path) -> None:
+    """Entry class file is created when it does not exist."""
+    from gatekeeper.gatekeeper import Integrator
+
+    mod_root = tmp_path / "MyMod"
+    mod_root.mkdir()
+    integ = Integrator.__new__(Integrator)
+    integ._mod_root = mod_root
+
+    integ._ensure_mod_entry_class()
+
+    entry = mod_root / "MyMod.cs"
+    assert entry.exists()
+    content = entry.read_text()
+    assert "namespace MyMod" in content
+    assert "class MyMod : Mod" in content
+
+
+def test_ensure_mod_entry_class_does_not_overwrite(tmp_path) -> None:
+    """Entry class file is left untouched when it already exists."""
+    from gatekeeper.gatekeeper import Integrator
+
+    mod_root = tmp_path / "MyMod"
+    mod_root.mkdir()
+    entry = mod_root / "MyMod.cs"
+    original = "// existing file"
+    entry.write_text(original)
+
+    integ = Integrator.__new__(Integrator)
+    integ._mod_root = mod_root
+    integ._ensure_mod_entry_class()
+
+    assert entry.read_text() == original
