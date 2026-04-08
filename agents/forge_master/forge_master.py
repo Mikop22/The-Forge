@@ -5,6 +5,15 @@ from __future__ import annotations
 import json
 import re
 import textwrap
+import warnings
+
+# Same LangChain/Pydantic 2 serialization noise as in architect.py — suppress.
+warnings.filterwarnings(
+    "ignore",
+    message="Pydantic serializer warnings",
+    category=UserWarning,
+    module="pydantic",
+)
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI

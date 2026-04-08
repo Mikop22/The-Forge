@@ -109,11 +109,11 @@ AmmoIDLiteral = Literal[
 # --- Shot-style choices: single source of truth for all models. ---
 SHOT_STYLE_CHOICES: tuple[str, ...] = (
     "direct", "sky_strike", "homing", "boomerang",
-    "orbit", "explosion", "pierce", "chain_lightning",
+    "orbit", "explosion", "pierce", "chain_lightning", "channeled",
 )
 ShotStyleLiteral = Literal[
     "direct", "sky_strike", "homing", "boomerang",
-    "orbit", "explosion", "pierce", "chain_lightning",
+    "orbit", "explosion", "pierce", "chain_lightning", "channeled",
 ]
 
 # Build lookup tables for bare-name -> prefixed-name normalization.

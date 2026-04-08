@@ -12,6 +12,7 @@ if str(_AGENTS) not in sys.path:
 from forge_master.templates import (
     BOOMERANG_TEMPLATE,
     CHAIN_LIGHTNING_TEMPLATE,
+    CHANNELED_TEMPLATE,
     CUSTOM_PROJECTILE_TEMPLATE,
     EXPLOSION_TEMPLATE,
     HOMING_TEMPLATE,
@@ -62,6 +63,9 @@ class TestGetReferenceSnippet:
     def test_chain_lightning_returns_chain_template(self) -> None:
         assert get_reference_snippet("Staff", False, "chain_lightning") == CHAIN_LIGHTNING_TEMPLATE
 
+    def test_channeled_returns_channeled_template(self) -> None:
+        assert get_reference_snippet("Staff", False, "channeled") == CHANNELED_TEMPLATE
+
     def test_unknown_subtype_falls_back_to_sword(self) -> None:
         assert get_reference_snippet("Scythe") == SWORD_TEMPLATE
 
@@ -74,6 +78,7 @@ _ALL_TEMPLATES = {
     "EXPLOSION_TEMPLATE": EXPLOSION_TEMPLATE,
     "PIERCE_TEMPLATE": PIERCE_TEMPLATE,
     "CHAIN_LIGHTNING_TEMPLATE": CHAIN_LIGHTNING_TEMPLATE,
+    "CHANNELED_TEMPLATE": CHANNELED_TEMPLATE,
 }
 
 

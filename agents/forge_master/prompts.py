@@ -60,6 +60,12 @@ call Projectile.Resize() in OnKill() for AoE damage with dust/sound effects.
 penetrate=-1, tileCollide=false, usesLocalNPCImmunity=true, extraUpdates for speed.
   * "chain_lightning": generate both ModItem and ModProjectile. The projectile \
 OnHitNPC must spawn a new projectile aimed at the nearest other NPC.
+  * "channeled": generate both ModItem and ModProjectile. The item MUST set \
+Item.channel=true and Item.noUseGraphic=true. CanUseItem must limit to one \
+active projectile. The projectile AI must check player.channel each frame and \
+call Projectile.Kill() on release. Use player.heldProj, player.SetDummyItemTime(2), \
+and Projectile.timeLeft=2 to keep alive. Colliding() must redirect the hitbox \
+to the orb tip (Center + velocity).
 
 ## Reference Example (correct 1.4.4 pattern for this weapon type)
 ```csharp

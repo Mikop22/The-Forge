@@ -200,12 +200,12 @@ class ShotStyleTests(unittest.TestCase):
         self.assertEqual(m.shot_style, "sky_strike")
 
     def test_llm_mechanics_accepts_all_styles(self) -> None:
-        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning"):
+        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning", "channeled"):
             m = LLMMechanics(shot_style=style)
             self.assertEqual(m.shot_style, style)
 
     def test_mechanics_accepts_all_styles(self) -> None:
-        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning"):
+        for style in ("homing", "boomerang", "orbit", "explosion", "pierce", "chain_lightning", "channeled"):
             m = Mechanics(
                 crafting_material="ItemID.Wood",
                 crafting_cost=5,

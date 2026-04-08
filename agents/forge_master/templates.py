@@ -1018,6 +1018,201 @@ namespace ForgeGeneratedMod.Content.Items.Weapons
     }
 }"""
 
+CHANNELED_TEMPLATE = """\
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria;
+using Terraria.Audio;
+using Terraria.DataStructures;
+using Terraria.GameContent;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace ForgeGeneratedMod.Content.Items.Weapons
+{
+    // Channeled / held-button weapon: player holds USE to sustain a persistent
+    // orb projectile that follows the cursor.  Based on the Rainbow Rod / Last
+    // Prism pattern from ExampleMod (1.4.4 branch).
+    //
+    // Key flags:
+    //   Item.channel = true  — keeps player.channel == true while held
+    //   Item.noUseGraphic = true — projectile draws the staff in-hand
+    //   CanUseItem guard — prevents a second orb spawning on auto-refire
+
+    public class ExampleChanneledStaff : ModItem
+    {
+        public override void SetStaticDefaults()
+        {
+            Item.staff[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 38;
+            Item.height = 38;
+            Item.useStyle = ItemUseStyleID.Shoot;
+            Item.useAnimation = 20;
+            Item.useTime = 20;
+            Item.noMelee = true;
+            Item.noUseGraphic = true;
+            Item.channel = true;  // CRITICAL: keeps player.channel true while held
+
+            Item.DamageType = DamageClass.Magic;
+            Item.damage = 35;
+            Item.knockBack = 3f;
+            Item.mana = 6;
+            Item.crit = 4;
+
+            Item.shoot = ModContent.ProjectileType<ExampleChanneledProjectile>();
+            Item.shootSpeed = 28f;  // used as holdout radius by the projectile
+
+            Item.rare = ItemRarityID.Pink;
+            Item.value = Item.sellPrice(gold: 5);
+            Item.UseSound = SoundID.Item20;
+        }
+
+        // Prevent a second orb from spawning while one is already alive
+        public override bool CanUseItem(Player player)
+        {
+            return player.ownedProjectileCounts[ModContent.ProjectileType<ExampleChanneledProjectile>()] <= 0;
+        }
+
+        public override bool Shoot(Player player, EntitySource_ItemUse_WithAmmo source,
+            Vector2 position, Vector2 velocity, int type, int damage, float knockback)
+        {
+            Projectile.NewProjectile(source, position, velocity, type, damage, knockback, Main.myPlayer);
+            return false;
+        }
+
+        public override void AddRecipes()
+        {
+            CreateRecipe()
+                .AddIngredient(ItemID.SoulofLight, 10)
+                .AddIngredient(ItemID.CrystalShard, 5)
+                .AddTile(TileID.Anvils)
+                .Register();
+        }
+    }
+}
+
+namespace ForgeGeneratedMod.Content.Projectiles
+{
+    public class ExampleChanneledProjectile : ModProjectile
+    {
+        private const float HoldoutRadius = 28f;
+        private const float AimResponsiveness = 0.15f;
+
+        public override void SetStaticDefaults()
+        {
+            ProjectileID.Sets.HeldProjDoesNotUsePlayerGfxOffY[Type] = true;
+        }
+
+        public override void SetDefaults()
+        {
+            Projectile.width = 20;
+            Projectile.height = 20;
+            Projectile.friendly = true;
+            Projectile.DamageType = DamageClass.Magic;
+            Projectile.penetrate = -1;
+            Projectile.tileCollide = false;
+            Projectile.ignoreWater = true;
+            Projectile.hide = true;
+            Projectile.usesLocalNPCImmunity = true;
+            Projectile.localNPCHitCooldown = 20;
+        }
+
+        public override bool? Colliding(Rectangle projHitbox, Rectangle targetHitbox)
+        {
+            Vector2 tipCenter = Projectile.Center + Projectile.velocity;
+            Rectangle tipRect = new Rectangle(
+                (int)(tipCenter.X - Projectile.width * 0.5f),
+                (int)(tipCenter.Y - Projectile.height * 0.5f),
+                Projectile.width, Projectile.height);
+            return tipRect.Intersects(targetHitbox) ? true : (bool?)null;
+        }
+
+        public override void AI()
+        {
+            Player player = Main.player[Projectile.owner];
+            Vector2 playerHand = player.RotatedRelativePoint(player.MountedCenter, true);
+
+            if (Projectile.owner == Main.myPlayer)
+            {
+                if (player.channel && !player.noItems && !player.CCed)
+                {
+                    Vector2 toMouse = Main.MouseWorld - playerHand;
+                    if (toMouse == Vector2.Zero) toMouse = Vector2.UnitX;
+                    Vector2 targetDir = Vector2.Normalize(toMouse) * HoldoutRadius;
+                    Vector2 newVel = Vector2.Lerp(Projectile.velocity, targetDir, AimResponsiveness);
+                    if (newVel != Projectile.velocity)
+                        Projectile.netUpdate = true;
+                    Projectile.velocity = newVel;
+                }
+                else
+                {
+                    Projectile.Kill();
+                    return;
+                }
+            }
+
+            // Dust ring at orb tip
+            if (Main.rand.NextBool(3))
+            {
+                Vector2 orbTip = playerHand + Projectile.velocity;
+                Dust dust = Dust.NewDustDirect(orbTip - new Vector2(4f), 8, 8,
+                    DustID.MagicMirror, 0f, 0f, 100, Color.White, 1.0f);
+                dust.noGravity = true;
+                dust.velocity *= 0.4f;
+            }
+
+            if (Projectile.velocity.X != 0f)
+                Projectile.direction = Projectile.velocity.X > 0 ? 1 : -1;
+            Projectile.spriteDirection = Projectile.direction;
+
+            player.ChangeDir(Projectile.direction);
+            player.heldProj = Projectile.whoAmI;
+            player.SetDummyItemTime(2);  // must use SetDummyItemTime, not direct assignment
+            Projectile.Center = playerHand;
+            Projectile.rotation = Projectile.velocity.ToRotation() + MathHelper.PiOver2;
+            player.itemRotation = (Projectile.velocity * Projectile.direction).ToRotation();
+            Projectile.timeLeft = 2;  // refresh each frame to keep alive
+        }
+
+        public override bool PreDraw(ref Color lightColor)
+        {
+            Texture2D texture = TextureAssets.Projectile[Type].Value;
+            Vector2 drawPos = (Projectile.Center + Projectile.velocity - Main.screenPosition).Floor();
+            Color drawColor = Color.White;
+            drawColor.A = 200;
+            Main.EntitySpriteDraw(texture, drawPos, texture.Bounds, drawColor,
+                Projectile.rotation, texture.Size() * 0.5f, Projectile.scale,
+                SpriteEffects.None, 0);
+            return false;
+        }
+
+        public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone)
+        {
+            Vector2 orbTip = Projectile.Center + Projectile.velocity;
+            for (int i = 0; i < 8; i++)
+                Dust.NewDust(orbTip, 1, 1, DustID.MagicMirror,
+                    Main.rand.NextFloat(-2f, 2f), Main.rand.NextFloat(-2f, 2f));
+        }
+
+        public override void OnKill(int timeLeft)
+        {
+            SoundEngine.PlaySound(SoundID.Item8, Projectile.Center);
+            Vector2 orbTip = Projectile.Center + Projectile.velocity;
+            for (int i = 0; i < 16; i++)
+            {
+                float angle = MathHelper.TwoPi / 16f * i;
+                Vector2 vel = angle.ToRotationVector2() * Main.rand.NextFloat(1f, 3f);
+                Dust.NewDustDirect(orbTip, 1, 1, DustID.MagicMirror,
+                    vel.X, vel.Y, 0, Color.White, 1.2f).noGravity = true;
+            }
+        }
+    }
+}"""
+
 SUMMON_TEMPLATE = """\
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -1389,6 +1584,7 @@ def get_reference_snippet(sub_type: str, custom_projectile: bool = False, shot_s
         "explosion": EXPLOSION_TEMPLATE,
         "pierce": PIERCE_TEMPLATE,
         "chain_lightning": CHAIN_LIGHTNING_TEMPLATE,
+        "channeled": CHANNELED_TEMPLATE,
     }
     style_tmpl = _STYLE_TEMPLATES.get(shot_style)
     if style_tmpl:

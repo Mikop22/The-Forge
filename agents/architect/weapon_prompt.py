@@ -48,7 +48,12 @@ CRITICAL — structured enum fields:
     spawns a new projectile aimed at a nearby NPC, chaining from target to
     target. Use when the description mentions bouncing, chaining, jumping, or
     arcing between multiple enemies. Do NOT use this for effects that fall
-    from the sky.).
+    from the sky.),
+  "channeled" (player holds the use button to sustain a continuous effect —
+    a persistent orb, beam, or aura follows the cursor while held and
+    disappears on release. Use when the description mentions holding, charging,
+    sustaining, channeling, or a continuous/persistent effect like a Rainbow
+    Rod or Crystal Storm).
   IMPORTANT DISAMBIGUATION — sky_strike vs chain_lightning:
     sky_strike = projectiles come FROM ABOVE (spawn point is high in the sky).
     chain_lightning = projectile BOUNCES BETWEEN NPCs on the ground.
