@@ -116,28 +116,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEsc:
-			m.state = screenWizard
-			return m, nil
-		case tea.KeyEnter:
-			prompt := strings.TrimSpace(m.textInput.Value())
-			if prompt == "" {
-				m.errMsg = "Prompt cannot be empty."
-				return m, nil
-			}
-			m.prompt = prompt
-			m.errMsg = ""
-			return m.enterForge()
-		}
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
 
 func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Allow escaping an error state.
@@ -366,29 +344,6 @@ func (m model) screenView() string {
 	}
 }
 
-func (m model) inputView() string {
-	selection := buildMetaLine(craftedItem{
-		contentType: m.contentType,
-		subType:     m.subType,
-		tier:        m.tier,
-	})
-	lines := []string{
-		styles.TitleRune.Render("The Forge"),
-		styles.Subtitle.Render("Describe your item"),
-	}
-	if selection != "" {
-		lines = append(lines, styles.Meta.Render(selection))
-	}
-	lines = append(lines,
-		"",
-		styles.PromptInput.Render(m.textInput.View()),
-	)
-	if m.errMsg != "" {
-		lines = append(lines, styles.Error.Render(m.errMsg))
-	}
-	lines = append(lines, "", styles.Hint.Render("Enter forge  •  Esc back"))
-	return strings.Join(lines, "\n")
-}
 
 func (m model) forgeView() string {
 	if m.forgeErr != "" {
