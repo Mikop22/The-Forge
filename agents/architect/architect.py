@@ -3,19 +3,10 @@
 from __future__ import annotations
 
 import json
-import warnings
 
-# LangChain's with_structured_output(strict=True) internally creates a model
-# with `parsed: None` as a default, then fills it with the actual Pydantic
-# instance. Pydantic 2 warns during that intermediate serialization step —
-# this is a LangChain bug, not ours.  The message is multiline so we match
-# just the first line which is stable across Pydantic versions.
-warnings.filterwarnings(
-    "ignore",
-    message="Pydantic serializer warnings",
-    category=UserWarning,
-    module="pydantic",
-)
+from core.agent_warnings import suppress_langchain_pydantic_warnings
+
+suppress_langchain_pydantic_warnings()
 
 from langchain_openai import ChatOpenAI
 
@@ -58,12 +49,8 @@ class ArchitectAgent:
 
     def __init__(self, model_name: str = "gpt-5.4") -> None:
         self._llm = ChatOpenAI(model=model_name, timeout=120)
-        # strict=True: OpenAI SDK internally calls to_strict_json_schema(), which moves all
-        # fields into `required` and adds additionalProperties:false — so optional fields with
-        # defaults are handled correctly at the SDK level, not by LangChain. If LangChain's
-        # dispatch path changes in future (e.g. stops passing the Pydantic class directly),
-        # verify the generated schema still satisfies OpenAI strict mode requirements.
-        self._structured_llm = self._llm.with_structured_output(LLMItemOutput, strict=True)
+        # Omit strict=... for compatibility with LangChain versions that do not forward it.
+        self._structured_llm = self._llm.with_structured_output(LLMItemOutput)
         self._reference_policy = ReferencePolicy(
             finder=BrowserReferenceFinder(),
             approver=HybridReferenceApprover(model_name=model_name),

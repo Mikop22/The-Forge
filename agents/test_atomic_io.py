@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from atomic_io import atomic_write_text
+from core.atomic_io import atomic_write_text
 
 
 class AtomicWriteTests(unittest.TestCase):

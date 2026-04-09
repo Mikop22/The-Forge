@@ -9,8 +9,28 @@ from unittest import mock
 
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
-import atomic_io
+from core import atomic_io
 import orchestrator
+
+
+class RunSafeValidationTests(unittest.TestCase):
+    def test_invalid_mode_does_not_run_pipeline(self) -> None:
+        loop = asyncio.new_event_loop()
+        handler = orchestrator._RequestHandler(loop)
+        try:
+
+            async def run() -> None:
+                with mock.patch.object(orchestrator, "run_pipeline") as rp:
+                    with mock.patch.object(orchestrator, "run_instant_pipeline") as rip:
+                        with mock.patch.object(orchestrator, "_set_error") as se:
+                            await handler._run_safe({"prompt": "x", "mode": "bogus"})
+                            rp.assert_not_called()
+                            rip.assert_not_called()
+                            se.assert_called_once()
+
+            loop.run_until_complete(run())
+        finally:
+            loop.close()
 
 
 class RequestHandlerEventTests(unittest.TestCase):

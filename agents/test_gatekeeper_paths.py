@@ -16,8 +16,8 @@ def test_default_mod_sources_dir_matches_linux_layout() -> None:
     from gatekeeper.gatekeeper import default_mod_sources_dir
 
     fake_home = Path("/home/testuser")
-    with mock.patch("paths.Path.home", return_value=fake_home):
-        with mock.patch("paths.platform.system", return_value="Linux"):
+    with mock.patch("core.paths.Path.home", return_value=fake_home):
+        with mock.patch("core.paths.platform.system", return_value="Linux"):
             with mock.patch.dict(os.environ, {}, clear=True):
                 got = default_mod_sources_dir()
     want = fake_home / ".local" / "share" / "Terraria" / "tModLoader" / "ModSources"
@@ -45,8 +45,8 @@ def test_enabled_json_follows_mod_sources_parent() -> None:
     from gatekeeper.gatekeeper import default_mod_sources_dir, tmod_enabled_json_path
 
     fake_home = Path("/home/testuser")
-    with mock.patch("paths.Path.home", return_value=fake_home):
-        with mock.patch("paths.platform.system", return_value="Linux"):
+    with mock.patch("core.paths.Path.home", return_value=fake_home):
+        with mock.patch("core.paths.platform.system", return_value="Linux"):
             with mock.patch.dict(os.environ, {}, clear=True):
                 ms = default_mod_sources_dir()
                 got = tmod_enabled_json_path()

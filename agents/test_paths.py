@@ -11,7 +11,7 @@ _AGENTS = Path(__file__).resolve().parent
 if str(_AGENTS) not in sys.path:
     sys.path.insert(0, str(_AGENTS))
 
-import paths  # noqa: E402
+from core import paths  # noqa: E402
 
 
 def test_read_mod_sources_dir_from_config_root_keys_only(tmp_path: Path) -> None:

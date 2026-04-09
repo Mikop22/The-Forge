@@ -6,7 +6,7 @@ import re
 import sys
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -23,13 +23,13 @@ except ImportError:
     from architect.models import ShotStyleLiteral
 
 try:
-    from utils import to_pascal_case as _to_pascal_case
+    from core.utils import to_pascal_case as _to_pascal_case
 except ImportError:
     from pathlib import Path as _Path
     _parent = str(_Path(__file__).resolve().parent.parent)
     if _parent not in sys.path:
         sys.path.insert(0, _parent)
-    from utils import to_pascal_case as _to_pascal_case
+    from core.utils import to_pascal_case as _to_pascal_case
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +53,13 @@ class ManifestMechanics(BaseModel):
     crafting_material: str
     crafting_cost: int
     crafting_tile: str
+
+    @model_validator(mode="after")
+    def coerce_custom_projectile(self):
+        """custom_projectile is only meaningful for shot_style='direct'."""
+        if self.shot_style != "direct":
+            self.custom_projectile = False
+        return self
 
 
 class ProjectileVisuals(BaseModel):

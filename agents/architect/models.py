@@ -436,6 +436,13 @@ class LLMMechanics(BaseModel):
     def normalize_projectile_ids(cls, value):
         return _normalize_projectile_id(value)
 
+    @model_validator(mode="after")
+    def coerce_custom_projectile(self):
+        """custom_projectile is only meaningful for shot_style='direct'."""
+        if self.shot_style != "direct":
+            self.custom_projectile = False
+        return self
+
 
 class AccessoryStats(BaseModel):
     defense: int = 0
@@ -582,16 +589,22 @@ class Mechanics(BaseModel):
     def normalize_projectile_ids(cls, value):
         return _normalize_projectile_id(value)
 
+    @model_validator(mode="after")
+    def coerce_custom_projectile(self):
+        """custom_projectile is only meaningful for shot_style='direct'."""
+        if self.shot_style != "direct":
+            self.custom_projectile = False
+        return self
+
 
 try:
-    from utils import to_pascal_case as _to_pascal_case
+    from core.utils import to_pascal_case as _to_pascal_case
 except ImportError:
-    # Fallback: parent directory may not be on sys.path
     from pathlib import Path as _Path
     _parent = str(_Path(__file__).resolve().parent.parent)
     if _parent not in sys.path:
         sys.path.insert(0, _parent)
-    from utils import to_pascal_case as _to_pascal_case
+    from core.utils import to_pascal_case as _to_pascal_case
 
 
 class ItemManifest(BaseModel):

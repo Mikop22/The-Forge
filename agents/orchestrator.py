@@ -22,13 +22,16 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import ValidationError
+
 load_dotenv(Path(__file__).parent / ".env")
 
+from contracts.ipc import UserRequest
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from atomic_io import atomic_write_text as _atomic_write_text
-from paths import mod_sources_root
+from core.atomic_io import atomic_write_text as _atomic_write_text
+from core.paths import mod_sources_root
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -446,13 +449,21 @@ class _RequestHandler(FileSystemEventHandler):
         """Execute the pipeline with top-level error handling."""
         async with self._lock:  # serialise concurrent requests
             try:
-                mode = request.get("mode", "compile")
+                try:
+                    validated = UserRequest.model_validate(request)
+                except ValidationError as exc:
+                    log.error("Invalid user_request.json: %s", exc)
+                    _set_error(f"Invalid request: {exc}")
+                    return
+                # Merge so Pydantic coercion applies to known fields while unknown keys are kept.
+                merged: dict[str, Any] = {**request, **validated.model_dump()}
+                mode = merged.get("mode", "compile")
                 if mode == "instant":
                     log.info("Mode: instant inject (template pool)")
-                    await run_instant_pipeline(request)
+                    await run_instant_pipeline(merged)
                 else:
                     log.info("Mode: full compile")
-                    await run_pipeline(request)
+                    await run_pipeline(merged)
             except Exception as exc:
                 log.exception("Pipeline failed")
                 _set_error(str(exc))

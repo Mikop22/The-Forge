@@ -6,7 +6,7 @@ import json
 import re
 import textwrap
 
-from agent_warnings import suppress_langchain_pydantic_warnings
+from core.agent_warnings import suppress_langchain_pydantic_warnings
 
 suppress_langchain_pydantic_warnings()
 
