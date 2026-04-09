@@ -200,7 +200,7 @@ code_result, art_result = await asyncio.gather(coder_future, artist_future)
 
 ### 5a. CoderAgent (Forge Master)
 
-**Files:** `forge_master/forge_master.py`, `forge_master/templates.py`, `forge_master/prompts.py`, `forge_master/models.py`
+**Files:** `forge_master/forge_master.py`, `forge_master/templates/` (snippets + validation), `forge_master/prompts.py`, `forge_master/models.py`
 
 #### Purpose
 

@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from unittest import mock
-
-_AGENTS = Path(__file__).resolve().parent
-if str(_AGENTS) not in sys.path:
-    sys.path.insert(0, str(_AGENTS))
 
 
 def test_default_mod_sources_dir_matches_linux_layout() -> None:

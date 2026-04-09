@@ -3,15 +3,10 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from unittest import mock
 
-_AGENTS = Path(__file__).resolve().parent
-if str(_AGENTS) not in sys.path:
-    sys.path.insert(0, str(_AGENTS))
-
-from core import paths  # noqa: E402
+from core import paths
 
 
 def test_read_mod_sources_dir_from_config_root_keys_only(tmp_path: Path) -> None:

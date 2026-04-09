@@ -139,6 +139,14 @@ class MechanicsBuffNormalizationTests(unittest.TestCase):
         m = self._base(buff_id="BuffID.Venom")
         self.assertIsNone(m.buff_id)
 
+    def test_channeled_coerces_custom_projectile_false(self) -> None:
+        m = self._base(shot_style="channeled", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_direct_preserves_custom_projectile_true(self) -> None:
+        m = self._base(shot_style="direct", custom_projectile=True)
+        self.assertTrue(m.custom_projectile)
+
 
 @pytest.mark.parametrize("raw,expected", [
     # Canonical forms — unchanged
@@ -218,6 +226,70 @@ class ShotStyleTests(unittest.TestCase):
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
             LLMMechanics(shot_style="orbital")
+
+
+class CustomProjectileCoercionTests(unittest.TestCase):
+    """custom_projectile must be forced False when shot_style != 'direct'."""
+
+    def test_channeled_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="channeled", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_homing_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="homing", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_orbit_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="orbit", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_sky_strike_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="sky_strike", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_boomerang_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="boomerang", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_explosion_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="explosion", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_pierce_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="pierce", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_chain_lightning_coerces_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="chain_lightning", custom_projectile=True)
+        self.assertFalse(m.custom_projectile)
+
+    def test_direct_preserves_custom_projectile_true(self) -> None:
+        m = LLMMechanics(shot_style="direct", custom_projectile=True)
+        self.assertTrue(m.custom_projectile)
+
+    def test_direct_default_custom_projectile_false(self) -> None:
+        m = LLMMechanics(shot_style="direct", custom_projectile=False)
+        self.assertFalse(m.custom_projectile)
+
+    def test_manifest_mechanics_channeled_coerces(self) -> None:
+        m = ManifestMechanics(
+            shot_style="channeled",
+            custom_projectile=True,
+            crafting_material="ItemID.Wood",
+            crafting_cost=5,
+            crafting_tile="TileID.WorkBenches",
+        )
+        self.assertFalse(m.custom_projectile)
+
+    def test_manifest_mechanics_direct_preserves(self) -> None:
+        m = ManifestMechanics(
+            shot_style="direct",
+            custom_projectile=True,
+            crafting_material="ItemID.Wood",
+            crafting_cost=5,
+            crafting_tile="TileID.WorkBenches",
+        )
+        self.assertTrue(m.custom_projectile)
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ def select_best_variant(
         content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"}})
 
     llm = ChatOpenAI(model=model, timeout=60).with_structured_output(
-        _VariantSelection, strict=True
+        _VariantSelection
     )
     messages = [
         SystemMessage(content=_SELECTOR_SYSTEM.format(n=n)),

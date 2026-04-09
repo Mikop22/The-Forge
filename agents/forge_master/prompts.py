@@ -1,16 +1,14 @@
 """Prompt templates for the Forge Master agent."""
 
+from __future__ import annotations
+
 from langchain_core.prompts import ChatPromptTemplate
 
 # ---------------------------------------------------------------------------
-# Code-generation prompt
+# Shared rules (codegen + repair must stay aligned)
 # ---------------------------------------------------------------------------
 
-CODEGEN_SYSTEM = """\
-You are an expert C# developer specializing in **tModLoader 1.4.4**. You \
-strictly adhere to the 1.4.4 API.
-
-## Absolute Rules
+FORGE_ABSOLUTE_RULES = """## Absolute Rules
 1. You NEVER use `ModRecipe`. You ALWAYS use `CreateRecipe()`.
 2. You NEVER use `item.melee`, `item.ranged`, `item.magic`, or `item.summon`. \
 You ALWAYS use `Item.DamageType = <DamageClass>`.
@@ -21,6 +19,17 @@ localization file exists.
 `public override void OnHitNPC(Player player, NPC target, NPC.HitInfo hit, int damageDone)`. \
 ModProjectile.OnHitNPC signature: \
 `public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone)` — NO Player parameter.
+"""
+
+# ---------------------------------------------------------------------------
+# Code-generation prompt
+# ---------------------------------------------------------------------------
+
+CODEGEN_SYSTEM = """\
+You are an expert C# developer specializing in **tModLoader 1.4.4**. You \
+strictly adhere to the 1.4.4 API.
+
+""" + FORGE_ABSOLUTE_RULES + """
 
 ## Allowed Imports (use whichever are needed)
 - `using Terraria;`
@@ -105,13 +114,7 @@ You are a C# compiler-error debugger specializing in **tModLoader 1.4.4**.
 You will receive a C# source file and a compiler error. You must fix the code \
 so it compiles correctly.
 
-## Absolute Rules (same as generation)
-1. NEVER use `ModRecipe`. ALWAYS use `CreateRecipe()`.
-2. NEVER use `item.melee` / `item.ranged` / `item.magic` / `item.summon`. \
-ALWAYS use `Item.DamageType`.
-3. NEVER use `System.Drawing`. Use `Microsoft.Xna.Framework`.
-4. NEVER hardcode display text.
-5. ALWAYS use the 1.4.4 `OnHitNPC` signature with `NPC.HitInfo`.
+""" + FORGE_ABSOLUTE_RULES + """
 
 ## Output
 Return ONLY the corrected, complete C# source file. No markdown fences, \

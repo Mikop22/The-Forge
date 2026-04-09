@@ -1,0 +1,53 @@
+"""Reference C# snippets, mappings, and post-generation validation."""
+
+from __future__ import annotations
+
+from .snippets import (
+    BOW_TEMPLATE,
+    BOOMERANG_TEMPLATE,
+    CHAIN_LIGHTNING_TEMPLATE,
+    CHANNELED_TEMPLATE,
+    CUSTOM_PROJECTILE_TEMPLATE,
+    DAMAGE_CLASS_MAP,
+    EXPLOSION_TEMPLATE,
+    GUN_TEMPLATE,
+    HOMING_TEMPLATE,
+    ORBIT_TEMPLATE,
+    PIERCE_TEMPLATE,
+    REFERENCE_SNIPPETS,
+    SKY_STRIKE_TEMPLATE,
+    STAFF_TEMPLATE,
+    STYLE_TEMPLATES,
+    SUMMON_TEMPLATE,
+    SWORD_TEMPLATE,
+    USE_STYLE_MAP,
+    WHIP_TEMPLATE,
+    get_reference_snippet,
+)
+from .validation import BANNED_PATTERNS, REQUIRED_PATTERNS, validate_cs
+
+__all__ = [
+    "BANNED_PATTERNS",
+    "BOW_TEMPLATE",
+    "BOOMERANG_TEMPLATE",
+    "CHAIN_LIGHTNING_TEMPLATE",
+    "CHANNELED_TEMPLATE",
+    "CUSTOM_PROJECTILE_TEMPLATE",
+    "DAMAGE_CLASS_MAP",
+    "EXPLOSION_TEMPLATE",
+    "GUN_TEMPLATE",
+    "HOMING_TEMPLATE",
+    "ORBIT_TEMPLATE",
+    "PIERCE_TEMPLATE",
+    "REFERENCE_SNIPPETS",
+    "REQUIRED_PATTERNS",
+    "SKY_STRIKE_TEMPLATE",
+    "STAFF_TEMPLATE",
+    "STYLE_TEMPLATES",
+    "SUMMON_TEMPLATE",
+    "SWORD_TEMPLATE",
+    "USE_STYLE_MAP",
+    "WHIP_TEMPLATE",
+    "get_reference_snippet",
+    "validate_cs",
+]

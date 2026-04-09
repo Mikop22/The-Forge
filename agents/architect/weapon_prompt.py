@@ -62,6 +62,11 @@ CRITICAL — structured enum fields:
   or ProjectileID.Starfury. For other non-direct styles, set shoot_projectile
   to null AND set custom_projectile to false — the shot_style template already
   includes the appropriate ModProjectile class.
+- `mechanics.custom_projectile` must ONLY be set to true when shot_style is
+  "direct" AND the user explicitly wants a custom projectile sprite. If
+  shot_style is ANY non-direct value (sky_strike, homing, boomerang, orbit,
+  explosion, pierce, chain_lightning, channeled), custom_projectile MUST be
+  false — those templates already provide their own ModProjectile classes.
 
 Keep crafting data empty unless the user explicitly describes a recipe.
 """

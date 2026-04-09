@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_AGENTS = Path(__file__).resolve().parent
-if str(_AGENTS) not in sys.path:
-    sys.path.insert(0, str(_AGENTS))
-
 from forge_master.templates import (
     BOOMERANG_TEMPLATE,
     CHAIN_LIGHTNING_TEMPLATE,
@@ -42,8 +35,15 @@ class TestGetReferenceSnippet:
     def test_sword_sky_strike_returns_sky_template(self) -> None:
         assert get_reference_snippet("Sword", False, "sky_strike") == SKY_STRIKE_TEMPLATE
 
-    def test_custom_projectile_overrides_shot_style(self) -> None:
-        assert get_reference_snippet("Staff", True, "sky_strike") == CUSTOM_PROJECTILE_TEMPLATE
+    def test_custom_projectile_does_not_override_non_direct(self) -> None:
+        """shot_style takes priority over custom_projectile for non-direct styles."""
+        assert get_reference_snippet("Staff", True, "sky_strike") == SKY_STRIKE_TEMPLATE
+
+    def test_custom_projectile_channeled_returns_channeled(self) -> None:
+        assert get_reference_snippet("Staff", True, "channeled") == CHANNELED_TEMPLATE
+
+    def test_custom_projectile_direct_returns_custom_template(self) -> None:
+        assert get_reference_snippet("Staff", True, "direct") == CUSTOM_PROJECTILE_TEMPLATE
 
     def test_homing_returns_homing_template(self) -> None:
         assert get_reference_snippet("Staff", False, "homing") == HOMING_TEMPLATE
