@@ -139,26 +139,6 @@ func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
-			selected, _ := m.modeList.SelectedItem().(optionItem)
-			m.contentType = selected.title
-			m.subType = ""
-			m.tier = ""
-			m.wizardIndex = 0
-			m.configureWizardStep()
-			m.state = screenWizard
-			return m, nil
-		}
-	}
-
-	var cmd tea.Cmd
-	m.modeList, cmd = m.modeList.Update(msg)
-	return m, cmd
-}
-
 func (m model) updateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.Type {
@@ -449,16 +429,6 @@ func (m model) inputView() string {
 	}
 	lines = append(lines, "", styles.Hint.Render("Enter forge  •  Esc back"))
 	return strings.Join(lines, "\n")
-}
-
-func (m model) modeView() string {
-	return strings.Join([]string{
-		styles.TitleRune.Render("What do you want to forge?"),
-		styles.Subtitle.Render("Choose a content family"),
-		"",
-		m.modeList.View(),
-		styles.Hint.Render("↑/↓ navigate  •  Enter select"),
-	}, "\n")
 }
 
 func (m model) wizardView() string {
