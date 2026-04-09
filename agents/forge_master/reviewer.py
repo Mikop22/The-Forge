@@ -13,7 +13,7 @@ loop (up to ``max_attempts`` rounds) before the code is accepted or rejected.
 from __future__ import annotations
 
 import json
-from typing import Optional
+import re
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -229,9 +229,12 @@ class WeaponReviewer:
             model=model_name, timeout=300, reasoning_effort="high",
         )
 
+        # Omit strict= for compatibility — matches the policy in forge_master.py
+        # and architect.py where strict= is also omitted to avoid LangChain
+        # version-skew issues.
         self._review_chain = (
             build_review_prompt()
-            | self._review_llm.with_structured_output(ReviewOutput, strict=True)
+            | self._review_llm.with_structured_output(ReviewOutput)
         )
 
         from langchain_core.output_parsers import StrOutputParser
@@ -282,9 +285,12 @@ class WeaponReviewer:
             ]
 
             if not actionable:
-                # Only info-level issues — approve
-                review_result.approved = True
-                return cs_code, review_result
+                # Only info-level issues — approve without mutating the LLM result
+                return cs_code, ReviewOutput(
+                    approved=True,
+                    issues=review_result.issues,
+                    summary=review_result.summary,
+                )
 
             # Format issues for the fix prompt
             issue_text = self._format_issues(actionable)
@@ -321,7 +327,6 @@ class WeaponReviewer:
 
 def _strip_fences(text: str) -> str:
     """Remove markdown code fences if present."""
-    import re
     text = text.strip()
     text = re.sub(r"^```(?:csharp|cs)?\s*\n?", "", text)
     text = re.sub(r"\n?```\s*$", "", text)

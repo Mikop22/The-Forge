@@ -174,6 +174,11 @@ class CoderAgent:
         cs_code = original_code
         error_code = _extract_error_code(error_log)
 
+        # NOTE: fix_code intentionally skips the WeaponReviewer.  This path is
+        # a fast emergency repair triggered by a real tModLoader compiler error;
+        # adding the LLM review loop would double latency on an already-failed
+        # item.  The orchestrator will surface the repaired code for a full
+        # write_code re-run if game-logic validation is also required.
         for attempt in range(_MAX_ATTEMPTS):
             cs_code = self._repair(cs_code, error_log)
             violations = validate_cs(cs_code)
