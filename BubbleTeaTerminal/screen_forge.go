@@ -1,0 +1,148 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"theforge/internal/ipc"
+	"theforge/internal/modsources"
+)
+
+func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Allow escaping an error state.
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEsc && m.forgeErr != "" {
+		m.state = screenInput
+		m.forgeErr = ""
+		m.textInput.Focus()
+		return m, nil
+	}
+
+	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		m.lastForgeVerb = m.animTick % len(forgeVerbs)
+		// Animate heat smoothly toward the stage target.
+		if m.heat < m.stageTargetPct {
+			m.heat += 2
+			if m.heat > m.stageTargetPct {
+				m.heat = m.stageTargetPct
+			}
+		}
+		return m, cmd
+	case ipc.PollStatusMsg:
+		ps := ipc.ReadGenerationStatus()
+		switch ps.Status {
+		case "ready":
+			m.forgeItemName = ps.ItemName
+			m.forgeManifest = ps.Manifest
+			m.forgeSprPath = ps.SpritePath
+			m.forgeProjPath = ps.ProjectileSpritePath
+			m.heat = 100
+			return m, func() tea.Msg { return forgeDoneMsg{} }
+		case "error":
+			return m, func() tea.Msg { return forgeErrMsg{message: ps.ErrMsg} }
+		default:
+			// "building" or file not yet written — update stage and keep polling.
+			if ps.StagePct > m.stageTargetPct {
+				m.stageTargetPct = ps.StagePct
+			}
+			if ps.StageLabel != "" {
+				m.stageLabel = ps.StageLabel
+			}
+			return m, ipc.PollStatusCmd()
+		}
+	case forgeErrMsg:
+		m.forgeErr = msg.message
+		return m, nil
+	case forgeDoneMsg:
+		m.state = screenStaging
+		item := m.buildCraftedItem()
+		m.previewItem = &item
+		m.previewMode = previewModeActions
+		m.statEditIndex = 0
+		m.previewInput.SetValue("")
+		m.injecting = false
+		m.revealPhase = 1
+		checkBridgeCmd := func() tea.Msg { return bridgeStatusMsg{alive: ipc.ReadBridgeHeartbeat()} }
+		return m, tea.Batch(m.spinner.Tick, checkBridgeCmd)
+	}
+	return m, nil
+}
+
+func (m model) forgeView() string {
+	if m.forgeErr != "" {
+		return strings.Join([]string{
+			styles.Error.Render("✘ Forge Failed"),
+			"",
+			styles.Body.Render(m.forgeErr),
+			"",
+			styles.Hint.Render("Esc to go back"),
+		}, "\n")
+	}
+	label := m.stageLabel
+	if label == "" {
+		label = forgeVerbs[m.lastForgeVerb%len(forgeVerbs)] + "..."
+	}
+	return strings.Join([]string{
+		styles.TitleRune.Render("The Forge"),
+		styles.Progress.Render("Heat " + m.heatBar()),
+		"",
+		fmt.Sprintf("%s %s", m.spinner.View(), styles.Subtitle.Render(label)),
+		"",
+		styles.Hint.Render("Architecting manifest and forging sprite"),
+	}, "\n")
+}
+
+func (m model) enterForge() (tea.Model, tea.Cmd) {
+	m.state = screenForge
+	m.heat = 0
+	m.stageTargetPct = 0
+	m.stageLabel = ""
+	m.animTick = 0
+	m.lastForgeVerb = 0
+	m.revealPhase = 0
+	m.forgeErr = ""
+	m.forgeItemName = ""
+
+	prompt := m.prompt
+	tier := m.tier
+	contentType := m.contentType
+	subType := m.subType
+	craftingStation := m.craftingStation
+	pendingManifest := m.pendingManifest
+	pendingArtFeedback := strings.TrimSpace(m.pendingArtFeedback)
+	m.pendingManifest = nil
+	m.pendingArtFeedback = ""
+	startCmd := func() tea.Msg {
+		// Clear any stale status from a previous run.
+		_ = os.Remove(filepath.Join(modsources.Dir(), "generation_status.json"))
+		extra := map[string]interface{}{}
+		if pendingManifest != nil {
+			extra["existing_manifest"] = pendingManifest
+		}
+		if pendingArtFeedback != "" {
+			extra["art_feedback"] = pendingArtFeedback
+		}
+		if err := ipc.WriteUserRequest(prompt, tier, contentType, subType, craftingStation, extra); err != nil {
+			return forgeErrMsg{message: "Failed to write request: " + err.Error()}
+		}
+		return ipc.PollStatusMsg{}
+	}
+	return m, tea.Batch(m.spinner.Tick, startCmd)
+}
+
+func (m model) heatBar() string {
+	total := 12
+	filled := (m.heat * total) / 100
+	if filled > total {
+		filled = total
+	}
+	empty := total - filled
+	return strings.Repeat("█", filled) + strings.Repeat("░", empty) + fmt.Sprintf(" %d%%", m.heat)
+}
