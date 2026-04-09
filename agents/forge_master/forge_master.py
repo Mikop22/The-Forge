@@ -7,7 +7,11 @@ import re
 import textwrap
 import warnings
 
-# Same LangChain/Pydantic 2 serialization noise as in architect.py — suppress.
+# LangChain's with_structured_output(strict=True) internally creates a model
+# with `parsed: None` as a default, then fills it with the actual Pydantic
+# instance. Pydantic 2 warns during that intermediate serialization step —
+# this is a LangChain bug, not ours.  The message is multiline so we match
+# just the first line which is stable across Pydantic versions.
 warnings.filterwarnings(
     "ignore",
     message="Pydantic serializer warnings",
