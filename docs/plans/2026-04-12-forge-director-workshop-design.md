@@ -57,8 +57,8 @@ Relevant references:
 - Reload and runtime fragility are normal constraints of the environment.
 
 Relevant references:
-- [docs/llm-handoff/01-architecture.md](/Users/user/Desktop/the-forge/docs/llm-handoff/01-architecture.md)
-- [docs/llm-handoff/02-current-state.md](/Users/user/Desktop/the-forge/docs/llm-handoff/02-current-state.md)
+- [docs/architecture/01-architecture.md](/Users/user/Desktop/the-forge/docs/architecture/01-architecture.md)
+- [docs/architecture/02-current-state.md](/Users/user/Desktop/the-forge/docs/architecture/02-current-state.md)
 - tModLoader development workflow: https://github-wiki-see.page/m/tModLoader/tModLoader/wiki/Developing-with-Visual-Studio-Code
 
 ## Product Shape
