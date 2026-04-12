@@ -29,6 +29,12 @@ func initialModel() model {
 	pi.Width = 42
 	pi.Prompt = ""
 
+	ci := textinput.New()
+	ci.Placeholder = "Tell the director what to change or use /variants"
+	ci.CharLimit = 160
+	ci.Width = 56
+	ci.Prompt = ""
+
 	s := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(colorRune)))
 
 	delegate := list.NewDefaultDelegate()
@@ -56,9 +62,11 @@ func initialModel() model {
 		state:        screenMode,
 		textInput:    ti,
 		previewInput: pi,
+		commandInput: ci,
 		modeList:     modeList,
 		wizardList:   wizardList,
 		spinner:      s,
+		workshop:     newWorkshopState(),
 	}
 }
 

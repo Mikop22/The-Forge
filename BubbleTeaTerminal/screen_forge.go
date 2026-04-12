@@ -64,13 +64,14 @@ func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = screenStaging
 		item := m.buildCraftedItem()
 		m.previewItem = &item
+		m.workshop.SetBenchFromCraftedItem(item, m.forgeManifest)
 		m.previewMode = previewModeActions
 		m.statEditIndex = 0
 		m.previewInput.SetValue("")
 		m.injecting = false
 		m.revealPhase = 1
 		checkBridgeCmd := func() tea.Msg { return bridgeStatusMsg{alive: ipc.ReadBridgeHeartbeat()} }
-		return m, tea.Batch(m.spinner.Tick, checkBridgeCmd)
+		return m, tea.Batch(m.spinner.Tick, checkBridgeCmd, runtimeSummaryCmd())
 	}
 	return m, nil
 }

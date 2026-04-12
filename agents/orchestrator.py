@@ -26,7 +26,8 @@ from pydantic import ValidationError
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from contracts.ipc import UserRequest
+from contracts.ipc import GenerationStatus, UserRequest
+from contracts.workshop import BenchState, ShelfVariant, WorkshopRequest, WorkshopStatus
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -49,6 +50,8 @@ from core.runtime_contracts import (
     runtime_result_has_terminal_evidence,
 )
 from core.recovery_mode import fingerprint_thesis, next_recovery_mode
+from core.workshop_director import build_variants
+from core.workshop_session import WorkshopSessionStore
 from core.weapon_lab_archive import RuntimeGateRecord, WeaponLabArchive
 from core.weapon_lab_models import SearchBudget
 
@@ -70,6 +73,9 @@ log = logging.getLogger("orchestrator")
 _MOD_SOURCES = mod_sources_root()
 REQUEST_FILE = _MOD_SOURCES / "user_request.json"
 STATUS_FILE = _MOD_SOURCES / "generation_status.json"
+WORKSHOP_REQUEST_FILE = _MOD_SOURCES / "workshop_request.json"
+WORKSHOP_STATUS_FILE = _MOD_SOURCES / "workshop_status.json"
+WORKSHOP_SESSION_DIR = _MOD_SOURCES / ".forge_workshop_sessions"
 HEARTBEAT_FILE = _MOD_SOURCES / "orchestrator_alive.json"
 ORCHESTRATOR_LOCK_FILE = _MOD_SOURCES / ".forge_orchestrator.lock"
 HIDDEN_LAB_REQUEST_FILE = _MOD_SOURCES / "forge_lab_hidden_request.json"
@@ -79,6 +85,7 @@ HIDDEN_LAB_RUNTIME_TIMEOUT_S = 90.0
 # Where Pixelsmith drops sprites and Forge Master drops code
 _AGENTS_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = _AGENTS_ROOT / "output"
+WORKSHOP_STORE = WorkshopSessionStore(WORKSHOP_SESSION_DIR)
 
 # ---------------------------------------------------------------------------
 # Status helpers (TUI handshake)
@@ -95,6 +102,14 @@ def _write_status(payload: dict) -> None:
     text = json.dumps(payload, indent=2) + "\n"
     _atomic_write_text(STATUS_FILE, text)
     log.info("Status → %s", payload.get("status"))
+
+
+def _write_workshop_status(payload: dict[str, Any]) -> None:
+    """Atomically write workshop state for the TUI."""
+    validated = WorkshopStatus.model_validate(payload)
+    text = validated.model_dump_json(indent=2) + "\n"
+    _atomic_write_text(WORKSHOP_STATUS_FILE, text)
+    log.info("Workshop → %s", validated.last_action or "update")
 
 
 def _validation_error_message(exc: ValidationError) -> str:
@@ -219,6 +234,12 @@ def _set_ready(
             "inject_mode": inject_mode,
         }
     )
+    _sync_ready_workshop_session(
+        item_name=item_name,
+        manifest=manifest or {},
+        sprite_path=sprite_path,
+        projectile_sprite_path=projectile_sprite_path,
+    )
 
 
 def _set_error(message: str) -> None:
@@ -227,6 +248,212 @@ def _set_error(message: str) -> None:
             "status": "error",
             "error_code": "PIPELINE_FAIL",
             "message": f"The pipeline collapsed: {message}",
+        }
+    )
+
+
+def _slugify(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-") or "bench-item"
+
+
+def _bench_snapshot(
+    *,
+    item_name: str,
+    manifest: dict[str, Any] | None,
+    sprite_path: str,
+    projectile_sprite_path: str,
+) -> dict[str, Any]:
+    return BenchState(
+        item_id=_slugify(item_name),
+        label=item_name,
+        manifest=manifest or {},
+        sprite_path=sprite_path or None,
+        projectile_sprite_path=projectile_sprite_path or None,
+    ).model_dump(exclude_none=True)
+
+
+def _sync_ready_workshop_session(
+    *,
+    item_name: str,
+    manifest: dict[str, Any],
+    sprite_path: str,
+    projectile_sprite_path: str,
+) -> None:
+    if not item_name.strip():
+        return
+    bench = _bench_snapshot(
+        item_name=item_name,
+        manifest=manifest,
+        sprite_path=sprite_path,
+        projectile_sprite_path=projectile_sprite_path,
+    )
+    session_id = f"bench-{bench['item_id']}"
+    session = {
+        "session_id": session_id,
+        "bench": bench,
+        "baseline": bench,
+        "last_live": bench,
+        "shelf": [],
+    }
+    WORKSHOP_STORE.save(session)
+    _write_workshop_status(
+        {
+            "session_id": session_id,
+            "bench": bench,
+            "shelf": [],
+            "last_action": "ready",
+        }
+    )
+
+
+def _load_ready_bench_snapshot() -> dict[str, Any] | None:
+    if not STATUS_FILE.exists():
+        return None
+    try:
+        payload = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+        ready = GenerationStatus.model_validate(payload)
+    except (OSError, json.JSONDecodeError, ValidationError):
+        return None
+    if ready.status != "ready":
+        return None
+    item_name = (ready.batch_list or [""])[0]
+    if not item_name:
+        return None
+    return _bench_snapshot(
+        item_name=item_name,
+        manifest=ready.manifest or {},
+        sprite_path=ready.sprite_path or "",
+        projectile_sprite_path=ready.projectile_sprite_path or "",
+    )
+
+
+def _load_existing_workshop_session(session_id: str, store: WorkshopSessionStore | None = None) -> dict[str, Any]:
+    active_store = store or WORKSHOP_STORE
+    cleaned = session_id.strip()
+    if cleaned:
+        return active_store.load(cleaned)
+    return active_store.load_active()
+
+
+def _load_or_bootstrap_workshop_session(
+    request: WorkshopRequest,
+    *,
+    store: WorkshopSessionStore | None = None,
+    allow_bootstrap: bool = True,
+) -> dict[str, Any]:
+    active_store = store or WORKSHOP_STORE
+    session_id = request.session_id.strip()
+    if session_id:
+        session = active_store.load(session_id)
+        if session:
+            return session
+    else:
+        active = active_store.load_active()
+        if active:
+            return active
+
+    if not allow_bootstrap:
+        raise RuntimeError("No existing workshop session")
+
+    bench = None
+    if request.bench is not None:
+        bench = request.bench.model_dump(exclude_none=True)
+    if not bench:
+        bench = _load_ready_bench_snapshot()
+    if not bench:
+        raise RuntimeError("No ready bench item is available to start a workshop session")
+
+    item_id = str(bench.get("item_id") or "").strip()
+    if not item_id:
+        item_id = _slugify(str(bench.get("label") or "bench-item"))
+        bench["item_id"] = item_id
+    session_id = session_id or f"bench-{item_id}"
+    session = {
+        "session_id": session_id,
+        "bench": bench,
+        "baseline": bench,
+        "last_live": bench,
+        "shelf": [],
+    }
+    active_store.save(session)
+    return session
+
+
+def _build_shelf_variants(session: dict[str, Any], directive: str) -> list[dict[str, Any]]:
+    bench = dict(session.get("bench") or {})
+    variants = build_variants(
+        bench_manifest=dict(bench.get("manifest") or {}),
+        directive=directive,
+        session_id=str(session["session_id"]),
+        sprite_path=bench.get("sprite_path"),
+        projectile_sprite_path=bench.get("projectile_sprite_path"),
+    )
+    shelf: list[dict[str, Any]] = []
+    for variant in variants:
+        shelf.append(ShelfVariant.model_validate(variant).model_dump(exclude_none=True))
+    return shelf
+
+
+def _write_workshop_error(message: str, session: dict[str, Any] | None = None, session_id: str = "") -> None:
+    session = session or {}
+    _write_workshop_status(
+        {
+            "session_id": session_id or str(session.get("session_id", "")),
+            "bench": session.get("bench", {}),
+            "shelf": session.get("shelf", []),
+            "last_action": "error",
+            "error": message,
+        }
+    )
+
+
+def _handle_workshop_request(
+    request: WorkshopRequest,
+    *,
+    store: WorkshopSessionStore | None = None,
+) -> None:
+    active_store = store or WORKSHOP_STORE
+    allow_bootstrap = request.action == "variants"
+    session = _load_or_bootstrap_workshop_session(request, store=active_store, allow_bootstrap=allow_bootstrap)
+    action = request.action
+
+    if action == "variants":
+        directive = (request.directive or "").strip()
+        session["shelf"] = _build_shelf_variants(session, directive)
+    elif action == "bench":
+        variant_id = (request.variant_id or "").strip()
+        variant = next(
+            (candidate for candidate in session.get("shelf", []) if candidate.get("variant_id") == variant_id),
+            None,
+        )
+        if variant is None:
+            raise RuntimeError(f"Unknown variant_id: {variant_id or '<empty>'}")
+        session["bench"] = {
+            "item_id": str(session["bench"].get("item_id", "")),
+            "label": str(variant.get("label") or session["bench"].get("label") or ""),
+            "manifest": variant.get("manifest"),
+            "sprite_path": variant.get("sprite_path"),
+            "projectile_sprite_path": variant.get("projectile_sprite_path"),
+        }
+    elif action == "restore":
+        target = request.restore_target or "baseline"
+        snapshot = session.get(target)
+        if not snapshot:
+            raise RuntimeError(f"No stored snapshot for restore target: {target}")
+        session["bench"] = snapshot
+    elif action == "try":
+        session["last_live"] = dict(session.get("bench") or {})
+
+    active_store.save(session)
+    _write_workshop_status(
+        {
+            "session_id": session["session_id"],
+            "bench": session.get("bench", {}),
+            "shelf": session.get("shelf", []),
+            "last_action": action,
         }
     )
 
@@ -889,33 +1116,49 @@ class _RequestHandler(FileSystemEventHandler):
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         super().__init__()
-        self._last_trigger: float = 0.0
+        self._last_trigger: dict[str, float] = {}
         self._loop = loop
         self._lock = asyncio.Lock()
 
     def _handle_request_event(self, path: Path) -> None:
-        if path.resolve() != REQUEST_FILE.resolve():
+        try:
+            resolved = path.resolve()
+        except OSError:
             return
-        if not REQUEST_FILE.exists():
+
+        watched: Path | None = None
+        if resolved == REQUEST_FILE.resolve():
+            watched = REQUEST_FILE
+        elif resolved == WORKSHOP_REQUEST_FILE.resolve():
+            watched = WORKSHOP_REQUEST_FILE
+        if watched is None:
+            return
+        if not watched.exists():
             return
 
         now = time.monotonic()
-        if now - self._last_trigger < _DEBOUNCE_SECONDS:
+        key = str(watched.resolve())
+        if now - self._last_trigger.get(key, 0.0) < _DEBOUNCE_SECONDS:
             log.debug("Debounced duplicate event")
             return
-        self._last_trigger = now
 
-        log.info("Detected change → %s", REQUEST_FILE.name)
+        log.info("Detected change → %s", watched.name)
 
         try:
-            payload = json.loads(REQUEST_FILE.read_text(encoding="utf-8"))
+            payload = json.loads(watched.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
+            self._last_trigger.pop(key, None)
             log.error("Failed to read request file: %s", exc)
-            _set_error(str(exc))
+            if watched == REQUEST_FILE:
+                _set_error(str(exc))
+            else:
+                _write_workshop_error(str(exc))
             return
 
+        self._last_trigger[key] = now
+
         # Schedule on the main event loop from this watchdog thread.
-        asyncio.run_coroutine_threadsafe(self._run_safe(payload), self._loop)
+        asyncio.run_coroutine_threadsafe(self._run_safe(watched, payload), self._loop)
 
     def on_created(self, event) -> None:
         if event.is_directory:
@@ -932,9 +1175,39 @@ class _RequestHandler(FileSystemEventHandler):
             return
         self._handle_request_event(Path(event.dest_path))
 
-    async def _run_safe(self, request: dict) -> None:
+    async def _run_safe(self, source_file: Path, request: dict) -> None:
         """Execute the pipeline with top-level error handling."""
         async with self._lock:  # serialise concurrent requests
+            if source_file == WORKSHOP_REQUEST_FILE:
+                session: dict[str, Any] | None = None
+                try:
+                    try:
+                        validated = WorkshopRequest.model_validate(request)
+                    except ValidationError as exc:
+                        log.error("Invalid workshop_request.json: %s", exc)
+                        session = _load_existing_workshop_session(
+                            str(request.get("session_id", "")),
+                            WORKSHOP_STORE,
+                        )
+                        _write_workshop_error(
+                            f"Invalid workshop request: {_validation_error_message(exc)}",
+                            session=session,
+                            session_id=str(request.get("session_id", "")),
+                        )
+                        return
+                    session = _load_existing_workshop_session(validated.session_id, WORKSHOP_STORE)
+                    _handle_workshop_request(validated, store=WORKSHOP_STORE)
+                except Exception as exc:
+                    log.exception("Workshop request failed")
+                    if not session:
+                        session = _load_existing_workshop_session(str(request.get("session_id", "")), WORKSHOP_STORE)
+                    _write_workshop_error(
+                        str(exc),
+                        session=session,
+                        session_id=str(request.get("session_id", "")),
+                    )
+                return
+
             try:
                 try:
                     validated = UserRequest.model_validate(request)
@@ -969,6 +1242,8 @@ def main() -> None:
     log.info("ModSources: %s", _MOD_SOURCES.resolve())
     log.info("Watching: %s", REQUEST_FILE)
     log.info("Status:   %s", STATUS_FILE)
+    log.info("Workshop request: %s", WORKSHOP_REQUEST_FILE)
+    log.info("Workshop status:  %s", WORKSHOP_STATUS_FILE)
     log.info("Heartbeat: %s", HEARTBEAT_FILE)
 
     # Ensure the watched directory exists.

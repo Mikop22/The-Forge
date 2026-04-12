@@ -27,6 +27,9 @@ type connectorStatusMsg struct {
 	status string
 	detail string
 }
+type runtimeSummaryMsg struct {
+	banner workshopRuntimeBanner
+}
 
 type previewMode int
 
@@ -134,9 +137,11 @@ type model struct {
 	height int
 
 	craftedItems []craftedItem
+	workshop     workshopState
 
 	textInput    textinput.Model
 	previewInput textinput.Model
+	commandInput textinput.Model
 	modeList     list.Model
 	wizardList   list.Model
 	spinner      spinner.Model
@@ -164,17 +169,19 @@ type model struct {
 	stageLabel     string
 	stageTargetPct int
 
-	forgeManifest      map[string]interface{}
-	forgeSprPath       string
-	forgeProjPath      string
-	previewMode        previewMode
-	previewItem        *craftedItem
-	statEditIndex      int
+	forgeManifest map[string]interface{}
+	forgeSprPath  string
+	forgeProjPath string
+	previewMode   previewMode
+	previewItem   *craftedItem
+	statEditIndex int
 
 	bridgeAlive        bool
 	injectErr          string
 	injectStatus       string
 	injectDetail       string
+	commandMode        bool
+	workshopNotice     string
 	pendingManifest    map[string]interface{}
 	pendingArtFeedback string
 }

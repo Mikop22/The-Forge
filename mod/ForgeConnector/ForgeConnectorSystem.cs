@@ -40,12 +40,17 @@ namespace ForgeConnector
         private string _runtimeEventsPath = string.Empty;
         private string _heartbeatPath = string.Empty;
         private string _statusPath = string.Empty;
+        private string _runtimeSummaryPath = string.Empty;
         private int _watcherRetryCooldown;
         private int _injectPollCooldown;
         private string _activeHiddenLabCandidateId = string.Empty;
         private string _activeHiddenLabRunId = string.Empty;
         private string _activeHiddenLabPackageKey = string.Empty;
         private string _activeHiddenLabLoopFamily = string.Empty;
+        private string _lastRuntimeSummarySignature = string.Empty;
+        private string _lastLiveItemName = string.Empty;
+        private string _lastInjectStatus = string.Empty;
+        private string _lastRuntimeNote = string.Empty;
 
         // ------------------------------------------------------------------
         // Lifecycle
@@ -61,10 +66,12 @@ namespace ForgeConnector
             _runtimeEventsPath = Path.Combine(_modSourcesDir, "forge_lab_runtime_events.jsonl");
             _heartbeatPath = Path.Combine(_modSourcesDir, "forge_connector_alive.json");
             _statusPath    = Path.Combine(_modSourcesDir, "forge_connector_status.json");
+            _runtimeSummaryPath = Path.Combine(_modSourcesDir, "forge_runtime_summary.json");
 
             RegisterTemplateTypeIds();
             ForgeLabTelemetry.Configure(_modSourcesDir);
             WriteHeartbeat();
+            WriteRuntimeSummary(force: true);
             StartWatcher();
         }
 
@@ -76,6 +83,7 @@ namespace ForgeConnector
             ForgeLabTelemetry.Clear();
 
             try { File.Delete(_heartbeatPath); } catch { /* best-effort */ }
+            try { File.Delete(_runtimeSummaryPath); } catch { /* best-effort */ }
         }
 
         /// <summary>
@@ -156,9 +164,14 @@ namespace ForgeConnector
             {
                 bool triggered = TriggerReload();
                 WriteStatus(triggered ? "reload_triggered" : "reload_failed");
+                UpdateRuntimeSummaryState(
+                    triggered ? "reload_triggered" : "reload_failed",
+                    runtimeNote: triggered ? "Mod reload triggered." : "Mod reload failed."
+                );
             }
 
             TryProcessInject();
+            WriteRuntimeSummary();
         }
 
         /// <summary>
@@ -289,23 +302,27 @@ namespace ForgeConnector
                     if (spawned)
                     {
                         WriteStatus("item_injected", itemName, itemSlot);
+                        UpdateRuntimeSummaryState("item_injected", itemName, "Item delivered to inventory.");
                         Mod.Logger.Info("[ForgeConnector] Status written: item_injected");
                     }
                     else
                     {
                         WriteStatus("item_pending", "No local player — open a world or unpause to receive the item.", itemSlot);
+                        UpdateRuntimeSummaryState("item_pending", itemName, "No local player — open a world or unpause to receive the item.");
                         Mod.Logger.Info("[ForgeConnector] Status written: item_pending (LocalPlayer null)");
                     }
                 }
                 else
                 {
                     WriteStatus("inject_failed", "Invalid item type id after registration.", -1);
+                    UpdateRuntimeSummaryState("inject_failed", runtimeNote: "Invalid item type id after registration.");
                 }
             }
             catch (Exception ex)
             {
                 Mod.Logger.Error("[ForgeConnector] ProcessInject failed: " + ex);
                 WriteStatus("inject_failed", ex.Message, -1);
+                UpdateRuntimeSummaryState("inject_failed", runtimeNote: ex.Message);
             }
         }
 
@@ -910,7 +927,9 @@ namespace ForgeConnector
             _runtimeEventsPath = Path.Combine(_modSourcesDir, "forge_lab_runtime_events.jsonl");
             _heartbeatPath = Path.Combine(_modSourcesDir, "forge_connector_alive.json");
             _statusPath = Path.Combine(_modSourcesDir, "forge_connector_status.json");
+            _runtimeSummaryPath = Path.Combine(_modSourcesDir, "forge_runtime_summary.json");
             WriteHeartbeat();
+            WriteRuntimeSummary(force: true);
             StartWatcher();
         }
 
@@ -1198,6 +1217,64 @@ namespace ForgeConnector
                 {
                     Mod.Logger.Error("[ForgeConnector] WriteStatus recovery failed: " + ex2);
                 }
+            }
+        }
+
+        private void UpdateRuntimeSummaryState(string injectStatus = "", string liveItemName = "", string runtimeNote = "")
+        {
+            if (!string.IsNullOrWhiteSpace(injectStatus))
+                _lastInjectStatus = injectStatus;
+            if (!string.IsNullOrWhiteSpace(liveItemName))
+                _lastLiveItemName = liveItemName;
+            if (!string.IsNullOrWhiteSpace(runtimeNote))
+                _lastRuntimeNote = runtimeNote;
+
+            WriteRuntimeSummary();
+        }
+
+        private void WriteRuntimeSummary(bool force = false)
+        {
+            if (string.IsNullOrWhiteSpace(_runtimeSummaryPath))
+                return;
+
+            try
+            {
+                Directory.CreateDirectory(_modSourcesDir);
+
+                bool worldLoaded = !Main.gameMenu;
+                string note = worldLoaded
+                    ? (string.IsNullOrWhiteSpace(_lastRuntimeNote) ? "World loaded." : _lastRuntimeNote)
+                    : "At main menu.";
+
+                string signature = string.Join("|", new[]
+                {
+                    worldLoaded ? "1" : "0",
+                    _lastLiveItemName ?? string.Empty,
+                    _lastInjectStatus ?? string.Empty,
+                    note,
+                });
+
+                if (!force && string.Equals(signature, _lastRuntimeSummarySignature, StringComparison.Ordinal))
+                    return;
+
+                string json = JsonSerializer.Serialize(new
+                {
+                    bridge_alive = true,
+                    world_loaded = worldLoaded,
+                    live_item_name = string.IsNullOrWhiteSpace(_lastLiveItemName) ? null : _lastLiveItemName,
+                    last_inject_status = string.IsNullOrWhiteSpace(_lastInjectStatus) ? null : _lastInjectStatus,
+                    last_runtime_note = note,
+                    updated_at = DateTime.UtcNow.ToString("o"),
+                }, new JsonSerializerOptions { WriteIndented = true });
+
+                string tmp = _runtimeSummaryPath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, _runtimeSummaryPath, overwrite: true);
+                _lastRuntimeSummarySignature = signature;
+            }
+            catch (Exception ex)
+            {
+                Mod.Logger.Error("[ForgeConnector] WriteRuntimeSummary failed: " + ex.Message);
             }
         }
 
