@@ -1,8 +1,7 @@
 # Architecture Index
 
 ## Purpose
-This folder is the canonical LLM/operator entrypoint for the repo. It replaces the older mix of plan docs and ad hoc handoff notes with a short, current architecture set.
-
+Hello coding agent or human, start here to understand this project
 ## Canonical Docs
 1. `docs/architecture/00-index.md`
    - navigation, environment, reading order
