@@ -39,8 +39,7 @@ Read these first if you are trying to understand or modify the system:
 
 - [docs/architecture/01-architecture.md](docs/architecture/01-architecture.md)
 - [docs/architecture/02-current-state.md](docs/architecture/02-current-state.md)
-- [docs/architecture/03-storm-brand-live-bug.md](docs/architecture/03-storm-brand-live-bug.md)
-
+- 
 ## Prerequisites
 
 - Terraria with tModLoader installed
