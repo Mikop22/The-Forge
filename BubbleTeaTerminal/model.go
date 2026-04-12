@@ -145,6 +145,7 @@ type model struct {
 	modeList     list.Model
 	wizardList   list.Model
 	spinner      spinner.Model
+	sessionShell sessionShellState
 
 	prompt          string
 	tier            string

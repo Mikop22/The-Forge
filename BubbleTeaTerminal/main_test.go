@@ -89,6 +89,33 @@ func TestInitialModelStartsAtContentSelection(t *testing.T) {
 	}
 }
 
+func TestSessionShellRendersThreeRegions(t *testing.T) {
+	m := initialModel()
+	m.state = screenInput
+	m.textInput.SetValue("forge the shell")
+	m.commandInput.SetValue("forge a new staff")
+
+	got := m.View()
+	wantOrder := []string{"Top Strip", "Feed Container", "Persistent Command Bar"}
+	last := -1
+	for _, want := range wantOrder {
+		idx := strings.Index(got, want)
+		if idx < 0 {
+			t.Fatalf("session shell render = %q, want it to contain region %q", got, want)
+		}
+		if idx <= last {
+			t.Fatalf("session shell render = %q, want region %q after previous region", got, want)
+		}
+		last = idx
+	}
+	if strings.Contains(got, "Sigils") {
+		t.Fatalf("session shell render = %q, want it to omit legacy shell chrome", got)
+	}
+	if !strings.Contains(got, "forge the shell") {
+		t.Fatalf("session shell render = %q, want it to contain feed content text", got)
+	}
+}
+
 func TestConfigureWizardStepUsesSubtypeOptionsForContentType(t *testing.T) {
 	m := initialModel()
 	m.contentType = "Accessory"
@@ -356,4 +383,3 @@ weights_path = ""
 		t.Fatalf("write config: %v", err)
 	}
 }
-

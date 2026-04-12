@@ -66,6 +66,7 @@ func initialModel() model {
 		modeList:     modeList,
 		wizardList:   wizardList,
 		spinner:      s,
+		sessionShell: newSessionShellState(),
 		workshop:     newWorkshopState(),
 	}
 }
@@ -116,7 +117,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (m model) View() string {
 	content := m.screenView()
-	panel := m.renderShell(content)
+	panel := m.sessionShell.render(m, content)
 
 	if m.width <= 0 || m.height <= 0 {
 		return panel
