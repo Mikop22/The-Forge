@@ -2,7 +2,6 @@
 
 Agentic Terraria item generator. Describe an item, then The Forge designs it, writes the mod code, generates sprite art, and stages or injects it from the terminal UI.
 
-<img width="1364" height="703" alt="Screenshot 2026-03-11 at 11 13 51 AM" src="https://github.com/user-attachments/assets/ee8874e7-dd91-4678-bc0e-2ba1f12ec945" />
 
 
 
