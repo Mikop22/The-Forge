@@ -6,11 +6,13 @@ import (
 
 type sessionShellState struct {
 	events []sessionEvent
+	scopes map[sessionEventKind]int
 }
 
 func newSessionShellState() sessionShellState {
 	return sessionShellState{
 		events: make([]sessionEvent, 0, 16),
+		scopes: make(map[sessionEventKind]int),
 	}
 }
 
@@ -38,9 +40,14 @@ func (s sessionShellState) renderTopStrip(m model) string {
 }
 
 func (s sessionShellState) renderFeedContainer(content string) string {
+	feed := s.renderEventRows()
+	body := []string{feed}
+	if trimmed := strings.TrimSpace(content); trimmed != "" {
+		body = append(body, trimmed)
+	}
 	return strings.Join([]string{
 		styles.Meta.Render("Feed Container"),
-		styles.FrameCalm.Render(content),
+		styles.FrameCalm.Render(strings.Join(body, "\n\n")),
 	}, "\n")
 }
 

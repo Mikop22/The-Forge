@@ -29,6 +29,7 @@ func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.prompt = route.Directive
+				m.appendFeedEvent(sessionEventKindPrompt, "Forge: "+route.Directive)
 				return m.enterForge()
 			case commandActionVariants, commandActionBench, commandActionRestore:
 				if !m.hasActiveWorkshopBench() {
@@ -40,6 +41,7 @@ func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.errMsg = "Director request failed: " + err.Error()
 					return m, nil
 				}
+				m.appendFeedEvent(sessionEventKindSystem, "Workshop action sent: "+string(route.Action))
 				m.state = screenStaging
 				m.commandMode = false
 				return m, ipc.PollWorkshopStatusCmd(0)

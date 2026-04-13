@@ -17,4 +17,5 @@ type sessionEvent struct {
 	Kind      sessionEventKind
 	Message   string
 	CreatedAt time.Time
+	Scope     int
 }

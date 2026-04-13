@@ -44,8 +44,12 @@ func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forgeSprPath = ps.SpritePath
 			m.forgeProjPath = ps.ProjectileSpritePath
 			m.heat = 100
+			m.appendFeedEvent(sessionEventKindSystem, "Forge complete: "+strings.TrimSpace(ps.ItemName))
 			return m, func() tea.Msg { return forgeDoneMsg{} }
 		case "error":
+			if ps.ErrMsg != "" {
+				m.appendFeedEvent(sessionEventKindFailure, "Forge error: "+ps.ErrMsg)
+			}
 			return m, func() tea.Msg { return forgeErrMsg{message: ps.ErrMsg} }
 		default:
 			// "building" or file not yet written — update stage and keep polling.
@@ -55,6 +59,11 @@ func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ps.StageLabel != "" {
 				m.stageLabel = ps.StageLabel
 			}
+			label := ps.StageLabel
+			if label == "" {
+				label = "Building"
+			}
+			m.upsertFeedEvent(sessionEventKindRuntime, fmt.Sprintf("Forge progress: %d%% %s", ps.StagePct, label))
 			return m, ipc.PollStatusCmd()
 		}
 	case forgeErrMsg:
@@ -102,6 +111,7 @@ func (m model) forgeView() string {
 
 func (m model) enterForge() (tea.Model, tea.Cmd) {
 	m.state = screenForge
+	m.sessionShell.beginScope(sessionEventKindRuntime)
 	m.heat = 0
 	m.stageTargetPct = 0
 	m.stageLabel = ""

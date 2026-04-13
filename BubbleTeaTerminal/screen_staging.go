@@ -91,6 +91,14 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.detail != "" {
 			m.workshop.Runtime.LastRuntimeNote = msg.detail
 		}
+		if msg.status != "" {
+			detail := msg.detail
+			if detail != "" {
+				m.appendFeedEvent(sessionEventKindSystem, fmt.Sprintf("Connector %s: %s", msg.status, detail))
+			} else {
+				m.appendFeedEvent(sessionEventKindSystem, "Connector "+msg.status)
+			}
+		}
 		if msg.status == "item_injected" || msg.status == "item_pending" {
 			// For instant inject, auto-clear the forge_inject.json to prevent re-inject
 			_ = os.Remove(filepath.Join(modsources.Dir(), "forge_inject.json"))
@@ -188,6 +196,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.prompt = route.Directive
+					m.appendFeedEvent(sessionEventKindPrompt, "Forge: "+route.Directive)
 					return m.enterForge()
 				}
 
@@ -200,6 +209,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.injectErr = ""
 					m.injectStatus = ""
 					m.injectDetail = ""
+					m.appendFeedEvent(sessionEventKindSystem, "Workshop try: "+m.workshop.Bench.Label)
 					_ = os.Remove(filepath.Join(modsources.Dir(), "forge_connector_status.json"))
 					if err := ipc.WriteInjectFile(
 						m.workshop.Bench.Manifest,
@@ -220,6 +230,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.workshopNotice = "Director request failed: " + err.Error()
 					return m, nil
 				}
+				m.appendFeedEvent(sessionEventKindSystem, "Workshop action sent: "+string(route.Action))
 				m.workshopNotice = "Director request sent."
 				return m, ipc.PollWorkshopStatusCmd(0)
 			}
@@ -271,15 +282,17 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.injectErr = ""
 			m.injectStatus = ""
 			m.injectDetail = ""
+			label := m.forgeItemName
+			if strings.TrimSpace(m.workshop.Bench.Label) != "" {
+				label = m.workshop.Bench.Label
+			}
+			m.appendFeedEvent(sessionEventKindSystem, "Accept & Inject: "+label)
 			m.appendPreviewHistory()
 			// Always use the instant inject path: write forge_inject.json and
 			// let the ForgeConnector mod pick it up on the next game tick.
 			dir := modsources.Dir()
 			_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
-			injectItemName := m.forgeItemName
-			if strings.TrimSpace(m.workshop.Bench.Label) != "" {
-				injectItemName = m.workshop.Bench.Label
-			}
+			injectItemName := label
 			if err := ipc.WriteInjectFile(m.forgeManifest, injectItemName, m.forgeSprPath, m.forgeProjPath); err != nil {
 				m.injecting = false
 				m.injectErr = err.Error()
