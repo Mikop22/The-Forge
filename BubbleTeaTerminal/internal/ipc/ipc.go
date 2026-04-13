@@ -44,6 +44,7 @@ type RuntimeSummary struct {
 	LiveItemName     string
 	LastInjectStatus string
 	LastRuntimeNote  string
+	UpdatedAt        string
 }
 
 type WorkshopBench struct {
@@ -256,6 +257,7 @@ func ReadRuntimeSummary() RuntimeSummary {
 	summary.LiveItemName, _ = payload["live_item_name"].(string)
 	summary.LastInjectStatus, _ = payload["last_inject_status"].(string)
 	summary.LastRuntimeNote, _ = payload["last_runtime_note"].(string)
+	summary.UpdatedAt, _ = payload["updated_at"].(string)
 	return summary
 }
 

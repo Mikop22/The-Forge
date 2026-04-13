@@ -93,9 +93,13 @@ func (ws *workshopState) SetBenchFromCraftedItem(item craftedItem, manifest map[
 }
 
 func workshopBenchFromStatus(bench ipc.WorkshopBench) workshopBench {
+	label := bench.Label
+	if label == "" {
+		label = bench.ItemID
+	}
 	result := workshopBench{
 		ItemID:         bench.ItemID,
-		Label:          bench.Label,
+		Label:          label,
 		Manifest:       bench.Manifest,
 		SpritePath:     bench.SpritePath,
 		ProjectilePath: bench.ProjectileSpritePath,
@@ -108,6 +112,25 @@ func workshopBenchFromStatus(bench ipc.WorkshopBench) workshopBench {
 		),
 	}
 	return result
+}
+
+func workshopBenchHasRenderableContent(bench workshopBench) bool {
+	if strings.TrimSpace(bench.ItemID) != "" {
+		return true
+	}
+	if strings.TrimSpace(bench.Label) != "" {
+		return true
+	}
+	if len(bench.Manifest) > 0 {
+		return true
+	}
+	if strings.TrimSpace(bench.SpritePath) != "" {
+		return true
+	}
+	if strings.TrimSpace(bench.ProjectilePath) != "" {
+		return true
+	}
+	return false
 }
 
 func (ws *workshopState) ApplyStatus(status ipc.WorkshopStatus) {

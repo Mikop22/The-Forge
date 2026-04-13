@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,42 +23,16 @@ type workshopStatusMsg struct {
 	status ipc.WorkshopStatus
 }
 
-func resolveRuntimeBanner(summary ipc.RuntimeSummary, heartbeatAlive bool, status string, detail string) workshopRuntimeBanner {
-	banner := workshopRuntimeBanner{
-		BridgeAlive:      heartbeatAlive,
-		WorldLoaded:      summary.WorldLoaded,
-		LiveItemName:     summary.LiveItemName,
-		LastInjectStatus: summary.LastInjectStatus,
-		LastRuntimeNote:  summary.LastRuntimeNote,
-	}
-	if banner.LastInjectStatus == "" {
-		banner.LastInjectStatus = status
-	}
-	if banner.LastRuntimeNote == "" {
-		banner.LastRuntimeNote = detail
-	}
-	return banner
-}
-
-func runtimeSummaryCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg {
-		summary := ipc.ReadRuntimeSummary()
-		status, detail := ipc.ReadConnectorStatusPayload()
-		banner := resolveRuntimeBanner(summary, ipc.ReadBridgeHeartbeat(), status, detail)
-		return runtimeSummaryMsg{banner: banner}
-	})
-}
-
 func (m *model) applyWorkshopStatus(status ipc.WorkshopStatus) {
 	m.workshop.ApplyStatus(status)
 	m.workshopNotice = ""
 	if status.Error != "" {
 		m.workshopNotice = "Director error: " + status.Error
 	}
-	if m.workshop.Bench.Label != "" {
+	if workshopBenchHasRenderableContent(m.workshop.Bench) {
 		preview := craftedItemFromWorkshopBench(m.workshop.Bench)
 		m.previewItem = &preview
-		m.forgeItemName = m.workshop.Bench.Label
+		m.forgeItemName = preview.label
 		m.forgeManifest = m.workshop.Bench.Manifest
 		m.forgeSprPath = m.workshop.Bench.SpritePath
 		m.forgeProjPath = m.workshop.Bench.ProjectilePath
@@ -83,10 +56,10 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runtimeSummaryMsg:
 		m.workshop.Runtime = msg.banner
 		m.bridgeAlive = msg.banner.BridgeAlive
-		if msg.banner.LastInjectStatus != "" {
-			m.injectStatus = msg.banner.LastInjectStatus
-		}
-		if msg.banner.LastRuntimeNote != "" {
+		m.injectStatus = msg.banner.LastInjectStatus
+		if msg.banner.LastInjectStatus == "" {
+			m.injectDetail = ""
+		} else {
 			m.injectDetail = msg.banner.LastRuntimeNote
 		}
 		return m, runtimeSummaryCmd()
