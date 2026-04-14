@@ -18,7 +18,6 @@ import (
 func initialModel() model {
 	ti := textinput.New()
 	ti.Placeholder = "Describe your forged item..."
-	ti.Focus()
 	ti.CharLimit = 120
 	ti.Width = 54
 	ti.Prompt = ""
@@ -30,10 +29,11 @@ func initialModel() model {
 	pi.Prompt = ""
 
 	ci := textinput.New()
-	ci.Placeholder = "Tell the director what to change or use /variants"
+	ci.Placeholder = "Describe your forged item..."
 	ci.CharLimit = 160
 	ci.Width = 56
 	ci.Prompt = ""
+	ci.Focus()
 
 	s := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(lipgloss.NewStyle().Foreground(colorRune)))
 
@@ -58,15 +58,23 @@ func initialModel() model {
 	wizardList.DisableQuitKeybindings()
 	wizardList.SetHeight(12)
 
+	workshop := loadWorkshopState()
+	bridgeAlive := ipc.ReadBridgeHeartbeat()
+	workshop.Runtime.BridgeAlive = bridgeAlive
+	contentWidth := 120
+
 	return model{
-		state:        screenMode,
+		state:        screenInput,
+		contentWidth: contentWidth,
 		textInput:    ti,
 		previewInput: pi,
 		commandInput: ci,
 		modeList:     modeList,
 		wizardList:   wizardList,
 		spinner:      s,
-		workshop:     newWorkshopState(),
+		sessionShell: loadSessionShellState(),
+		workshop:     workshop,
+		bridgeAlive:  bridgeAlive,
 	}
 }
 
@@ -74,6 +82,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
 		animTickCmd(),
+		runtimeSummaryNowCmd(),
 		tea.SetWindowTitle("The Forge"),
 	)
 }
@@ -88,15 +97,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.termCompact = msg.Width < compactWidthThreshold || msg.Height < compactHeightThreshold
-		panelWidth := max(56, msg.Width-10)
-		if panelWidth > 88 {
-			panelWidth = 88
-		}
-		m.modeList.SetWidth(panelWidth - 8)
-		m.wizardList.SetWidth(panelWidth - 8)
+		m.contentWidth = clampInt(msg.Width-4, 32, 120)
+		panelWidth := clampInt(msg.Width-4, 32, 88)
+		listWidth := max(1, panelWidth-8)
+		m.modeList.SetWidth(listWidth)
+		m.wizardList.SetWidth(listWidth)
+		m.commandInput.Width = max(1, m.contentWidth-2)
+		m.textInput.Width = max(1, m.contentWidth-2)
+		m.previewInput.Width = max(1, min(42, m.contentWidth-2))
 	case animTickMsg:
 		m.animTick++
 		return m, animTickCmd()
+	case runtimeSummaryMsg:
+		m.applyRuntimeSummaryBanner(msg.banner)
+		return m, runtimeSummaryCmd()
 	}
 
 	switch m.state {
@@ -114,9 +128,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 }
+
+func clampInt(value, minimum, maximum int) int {
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
 func (m model) View() string {
 	content := m.screenView()
-	panel := m.renderShell(content)
+	panel := m.sessionShell.render(m, content)
 
 	if m.width <= 0 || m.height <= 0 {
 		return panel
@@ -125,8 +149,8 @@ func (m model) View() string {
 	return lipgloss.Place(
 		m.width,
 		m.height,
-		lipgloss.Center,
-		lipgloss.Center,
+		lipgloss.Left,
+		lipgloss.Bottom,
 		panel,
 		lipgloss.WithWhitespaceBackground(colorBg),
 	)

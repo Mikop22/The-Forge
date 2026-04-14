@@ -51,9 +51,11 @@ namespace ForgeConnector
         private string _activeHiddenLabPackageKey = string.Empty;
         private string _activeHiddenLabLoopFamily = string.Empty;
         private string _lastRuntimeSummarySignature = string.Empty;
+        private DateTime _lastRuntimeSummaryWriteAt = DateTime.MinValue;
         private string _lastLiveItemName = string.Empty;
         private string _lastInjectStatus = string.Empty;
         private string _lastRuntimeNote = string.Empty;
+        private static readonly TimeSpan RuntimeSummaryRefreshInterval = TimeSpan.FromSeconds(5);
 
         // ------------------------------------------------------------------
         // Lifecycle
@@ -326,27 +328,27 @@ namespace ForgeConnector
                     if (spawned)
                     {
                         WriteStatus("item_injected", itemName, itemSlot);
-                        UpdateRuntimeSummaryState("item_injected", itemName, "Item delivered to inventory.");
+                        UpdateRuntimeSummaryState("item_injected", liveItemName: itemName, runtimeNote: "Item delivered to inventory.");
                         Mod.Logger.Info("[ForgeConnector] Status written: item_injected");
                     }
                     else
                     {
                         WriteStatus("item_pending", "No local player — open a world or unpause to receive the item.", itemSlot);
-                        UpdateRuntimeSummaryState("item_pending", itemName, "No local player — open a world or unpause to receive the item.");
+                        UpdateRuntimeSummaryState("item_pending", liveItemName: itemName, runtimeNote: "No local player — open a world or unpause to receive the item.");
                         Mod.Logger.Info("[ForgeConnector] Status written: item_pending (LocalPlayer null)");
                     }
                 }
                 else
                 {
-                    WriteStatus("inject_failed", "Invalid item type id after registration.", -1);
-                    UpdateRuntimeSummaryState("inject_failed", runtimeNote: "Invalid item type id after registration.");
+                        WriteStatus("inject_failed", "Invalid item type id after registration.", -1);
+                    UpdateRuntimeSummaryState("inject_failed", clearLiveItemName: true, runtimeNote: "Invalid item type id after registration.");
                 }
             }
             catch (Exception ex)
             {
                 Mod.Logger.Error("[ForgeConnector] ProcessInject failed: " + ex);
                 WriteStatus("inject_failed", ex.Message, -1);
-                UpdateRuntimeSummaryState("inject_failed", runtimeNote: ex.Message);
+                UpdateRuntimeSummaryState("inject_failed", clearLiveItemName: true, runtimeNote: ex.Message);
             }
         }
 
@@ -1349,11 +1351,13 @@ namespace ForgeConnector
             }
         }
 
-        private void UpdateRuntimeSummaryState(string injectStatus = "", string liveItemName = "", string runtimeNote = "")
+        private void UpdateRuntimeSummaryState(string injectStatus = "", string liveItemName = "", bool clearLiveItemName = false, string runtimeNote = "")
         {
             if (!string.IsNullOrWhiteSpace(injectStatus))
                 _lastInjectStatus = injectStatus;
-            if (!string.IsNullOrWhiteSpace(liveItemName))
+            if (clearLiveItemName)
+                _lastLiveItemName = string.Empty;
+            else if (!string.IsNullOrWhiteSpace(liveItemName))
                 _lastLiveItemName = liveItemName;
             if (!string.IsNullOrWhiteSpace(runtimeNote))
                 _lastRuntimeNote = runtimeNote;
@@ -1374,6 +1378,7 @@ namespace ForgeConnector
                 string note = worldLoaded
                     ? (string.IsNullOrWhiteSpace(_lastRuntimeNote) ? "World loaded." : _lastRuntimeNote)
                     : "At main menu.";
+                DateTime now = DateTime.UtcNow;
 
                 string signature = string.Join("|", new[]
                 {
@@ -1383,7 +1388,9 @@ namespace ForgeConnector
                     note,
                 });
 
-                if (!force && string.Equals(signature, _lastRuntimeSummarySignature, StringComparison.Ordinal))
+                if (!force
+                    && string.Equals(signature, _lastRuntimeSummarySignature, StringComparison.Ordinal)
+                    && now - _lastRuntimeSummaryWriteAt < RuntimeSummaryRefreshInterval)
                     return;
 
                 string json = JsonSerializer.Serialize(new
@@ -1393,13 +1400,14 @@ namespace ForgeConnector
                     live_item_name = string.IsNullOrWhiteSpace(_lastLiveItemName) ? null : _lastLiveItemName,
                     last_inject_status = string.IsNullOrWhiteSpace(_lastInjectStatus) ? null : _lastInjectStatus,
                     last_runtime_note = note,
-                    updated_at = DateTime.UtcNow.ToString("o"),
+                    updated_at = now.ToString("o"),
                 }, new JsonSerializerOptions { WriteIndented = true });
 
                 string tmp = _runtimeSummaryPath + ".tmp";
                 File.WriteAllText(tmp, json);
                 File.Move(tmp, _runtimeSummaryPath, overwrite: true);
                 _lastRuntimeSummarySignature = signature;
+                _lastRuntimeSummaryWriteAt = now;
             }
             catch (Exception ex)
             {

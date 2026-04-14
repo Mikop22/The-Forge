@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -30,6 +31,15 @@ type connectorStatusMsg struct {
 type runtimeSummaryMsg struct {
 	banner workshopRuntimeBanner
 }
+
+type operationKind string
+
+const (
+	operationIdle      operationKind = ""
+	operationForging   operationKind = "forging"
+	operationDirector  operationKind = "director"
+	operationInjecting operationKind = "injecting"
+)
 
 type previewMode int
 
@@ -132,9 +142,10 @@ var previewStatFields = []statField{
 }
 
 type model struct {
-	state  screen
-	width  int
-	height int
+	state        screen
+	width        int
+	height       int
+	contentWidth int
 
 	craftedItems []craftedItem
 	workshop     workshopState
@@ -145,6 +156,7 @@ type model struct {
 	modeList     list.Model
 	wizardList   list.Model
 	spinner      spinner.Model
+	sessionShell sessionShellState
 
 	prompt          string
 	tier            string
@@ -182,8 +194,15 @@ type model struct {
 	injectDetail       string
 	commandMode        bool
 	workshopNotice     string
+	shellNotice        string
+	shellError         string
 	pendingManifest    map[string]interface{}
 	pendingArtFeedback string
+	operationKind      operationKind
+	operationLabel     string
+	operationStartedAt time.Time
+	operationStale     bool
+	forgePollCount     int
 }
 
 const (
@@ -193,3 +212,23 @@ const (
 
 var forgeVerbs = []string{"Tempering", "Binding", "Etching", "Awakening"}
 var wizardGlyphs = []string{"\u26e8", "\u2694", "\u2736", "\u27b6"}
+
+func (m model) hasActiveWorkshopBench() bool {
+	return strings.TrimSpace(m.workshop.Bench.ItemID) != "" || m.workshop.Bench.Manifest != nil
+}
+
+func (m model) shellSuggestion() string {
+	if strings.TrimSpace(m.commandInput.Value()) != "" {
+		return ""
+	}
+
+	if !m.hasActiveWorkshopBench() {
+		return "/forge <prompt>"
+	}
+
+	if len(m.workshop.Shelf) > 0 {
+		return "/bench <variant-id-or-number>"
+	}
+
+	return "/variants <direction>"
+}

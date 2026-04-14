@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"theforge/internal/ipc"
+	"theforge/internal/modsources"
 )
 
 type workshopBench struct {
@@ -17,6 +21,8 @@ type workshopBench struct {
 	SubType         string
 	CraftingStation string
 }
+
+const maxPinnedNotes = 5
 
 type workshopVariant struct {
 	VariantID      string
@@ -37,16 +43,23 @@ type workshopRuntimeBanner struct {
 }
 
 type workshopState struct {
-	SessionID string
-	Bench     workshopBench
-	Shelf     []workshopVariant
-	Runtime   workshopRuntimeBanner
+	SessionID  string
+	SnapshotID int
+	Bench      workshopBench
+	Shelf      []workshopVariant
+	Runtime    workshopRuntimeBanner
 }
 
 func newWorkshopState() workshopState {
 	return workshopState{
 		Shelf: []workshopVariant{},
 	}
+}
+
+func loadWorkshopState() workshopState {
+	ws := newWorkshopState()
+	ws.ApplyStatus(ipc.ReadWorkshopStatus())
+	return ws
 }
 
 func workshopIDFromLabel(label string) string {
@@ -93,9 +106,13 @@ func (ws *workshopState) SetBenchFromCraftedItem(item craftedItem, manifest map[
 }
 
 func workshopBenchFromStatus(bench ipc.WorkshopBench) workshopBench {
+	label := bench.Label
+	if label == "" {
+		label = bench.ItemID
+	}
 	result := workshopBench{
 		ItemID:         bench.ItemID,
-		Label:          bench.Label,
+		Label:          label,
 		Manifest:       bench.Manifest,
 		SpritePath:     bench.SpritePath,
 		ProjectilePath: bench.ProjectileSpritePath,
@@ -110,8 +127,28 @@ func workshopBenchFromStatus(bench ipc.WorkshopBench) workshopBench {
 	return result
 }
 
+func workshopBenchHasRenderableContent(bench workshopBench) bool {
+	if strings.TrimSpace(bench.ItemID) != "" {
+		return true
+	}
+	if strings.TrimSpace(bench.Label) != "" {
+		return true
+	}
+	if len(bench.Manifest) > 0 {
+		return true
+	}
+	if strings.TrimSpace(bench.SpritePath) != "" {
+		return true
+	}
+	if strings.TrimSpace(bench.ProjectilePath) != "" {
+		return true
+	}
+	return false
+}
+
 func (ws *workshopState) ApplyStatus(status ipc.WorkshopStatus) {
 	ws.SessionID = status.SessionID
+	ws.SnapshotID = status.SnapshotID
 	ws.Bench = workshopBenchFromStatus(status.Bench)
 	ws.Shelf = make([]workshopVariant, 0, len(status.Shelf))
 	for _, variant := range status.Shelf {
@@ -149,4 +186,36 @@ func manifestString(manifest map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func loadPinnedMemoryNotes() []string {
+	path := filepath.Join(modsources.Dir(), "session_shell_status.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var payload struct {
+		PinnedNotes []string `json:"pinned_notes"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil
+	}
+
+	return normalizePinnedNotes(payload.PinnedNotes)
+}
+
+func normalizePinnedNotes(notes []string) []string {
+	cleanedNotes := make([]string, 0, len(notes))
+	for _, note := range notes {
+		cleaned := strings.TrimSpace(note)
+		if cleaned == "" {
+			continue
+		}
+		cleanedNotes = append(cleanedNotes, cleaned)
+		if len(cleanedNotes) >= maxPinnedNotes {
+			break
+		}
+	}
+	return cleanedNotes
 }

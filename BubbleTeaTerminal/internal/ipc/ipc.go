@@ -44,6 +44,7 @@ type RuntimeSummary struct {
 	LiveItemName     string
 	LastInjectStatus string
 	LastRuntimeNote  string
+	UpdatedAt        string
 }
 
 type WorkshopBench struct {
@@ -66,6 +67,7 @@ type WorkshopVariant struct {
 
 type WorkshopStatus struct {
 	SessionID  string
+	SnapshotID int
 	Bench      WorkshopBench
 	Shelf      []WorkshopVariant
 	LastAction string
@@ -256,6 +258,7 @@ func ReadRuntimeSummary() RuntimeSummary {
 	summary.LiveItemName, _ = payload["live_item_name"].(string)
 	summary.LastInjectStatus, _ = payload["last_inject_status"].(string)
 	summary.LastRuntimeNote, _ = payload["last_runtime_note"].(string)
+	summary.UpdatedAt, _ = payload["updated_at"].(string)
 	return summary
 }
 
@@ -272,6 +275,9 @@ func ReadWorkshopStatus() WorkshopStatus {
 
 	status := WorkshopStatus{}
 	status.SessionID, _ = payload["session_id"].(string)
+	if snapshotID, ok := payload["snapshot_id"].(float64); ok {
+		status.SnapshotID = int(snapshotID)
+	}
 	status.LastAction, _ = payload["last_action"].(string)
 	status.Error, _ = payload["error"].(string)
 
