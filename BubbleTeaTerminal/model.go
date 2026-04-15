@@ -193,6 +193,7 @@ type model struct {
 	injectStatus       string
 	injectDetail       string
 	commandMode        bool
+	autocompleteIndex  int
 	workshopNotice     string
 	shellNotice        string
 	shellError         string

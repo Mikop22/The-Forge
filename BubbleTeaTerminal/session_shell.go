@@ -184,7 +184,9 @@ func (s sessionShellState) render(m model, content string) string {
 	top := s.renderTopStrip(m)
 	feed := s.renderFeedContainer(m, content)
 	command := s.renderCommandBar(m)
-	parts := make([]string, 0, 3)
+	drawer := renderAutocompleteDrawer(m)
+
+	parts := make([]string, 0, 5)
 	if strings.TrimSpace(top) != "" {
 		parts = append(parts, top)
 	}
@@ -192,6 +194,9 @@ func (s sessionShellState) render(m model, content string) string {
 		parts = append(parts, feed)
 	}
 	parts = append(parts, command)
+	if drawer != "" {
+		parts = append(parts, drawer)
+	}
 	return strings.Join(parts, "\n")
 }
 
