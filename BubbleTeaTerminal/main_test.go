@@ -1066,6 +1066,19 @@ func TestUserPromptAppearsInFeedAfterSubmit(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(model)
 
+	// Verify the user event is in the feed slice.
+	found := false
+	for _, ev := range next.sessionShell.events {
+		if ev.Kind == sessionEventKindUser && ev.Message == "glowing war axe" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("user event not in feed slice; events = %v", next.sessionShell.events)
+	}
+
+	// Also verify it renders in the view.
 	got := next.View()
 	if !strings.Contains(got, "glowing war axe") {
 		t.Fatalf("view = %q, want user prompt echoed in feed", got)
