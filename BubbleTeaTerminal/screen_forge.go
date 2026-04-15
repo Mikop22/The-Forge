@@ -20,12 +20,17 @@ const (
 )
 
 func (m model) updateForge(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Allow escaping an error state.
-	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEsc && m.forgeErr != "" {
-		m.state = screenInput
-		m.forgeErr = ""
-		m.commandInput.Focus()
-		return m, nil
+	// Allow escaping an error state or canceling an in-flight forge.
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEsc {
+		if m.forgeErr != "" || m.operationKind == operationForging {
+			m.state = screenInput
+			m.forgeErr = ""
+			m.operationKind = operationIdle
+			m.operationStale = false
+			m.appendFeedEvent(sessionEventKindSystem, "Forge cancelled.")
+			m.commandInput.Focus()
+			return m, nil
+		}
 	}
 
 	switch msg := msg.(type) {

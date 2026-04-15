@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -1096,5 +1097,72 @@ func TestErrorEventRendersWithPrefix(t *testing.T) {
 	}
 	if !strings.Contains(got, "pipeline collapsed") {
 		t.Fatalf("view = %q, want error message text in view", got)
+	}
+}
+
+func TestOperationLineShowsElapsedTime(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.operationKind = operationForging
+	m.operationLabel = "iron sword"
+	m.operationStartedAt = time.Now().Add(-15 * time.Second)
+
+	got := m.View()
+	if !strings.Contains(got, "15s") && !strings.Contains(got, "14s") {
+		t.Fatalf("view = %q, want elapsed seconds in operation line", got)
+	}
+}
+
+func TestCommandBarRendersKeyboardHintStrip(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+
+	got := m.View()
+	if !strings.Contains(got, "/ for commands") {
+		t.Fatalf("view = %q, want keyboard hint strip above separator", got)
+	}
+}
+
+func TestTopStatusBarShowsBenchName(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.workshop.Bench = workshopBench{ItemID: "iron-sword", Label: "Iron Sword"}
+	m.width = 120
+	m.height = 40
+
+	got := m.View()
+	if !strings.Contains(got, "Iron Sword") {
+		t.Fatalf("view = %q, want bench label in top status bar", got)
+	}
+}
+
+func TestTopStatusBarShowsRuntimeOfflineWhenBridgeDown(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.bridgeAlive = false
+	m.width = 120
+	m.height = 40
+
+	got := m.View()
+	if !strings.Contains(got, "offline") {
+		t.Fatalf("view = %q, want 'offline' in status bar when bridge is down", got)
+	}
+}
+
+func TestEscCancelsInFlightForge(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.state = screenForge
+	m.operationKind = operationForging
+	m.operationLabel = "iron sword"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(model)
+
+	if next.state != screenInput {
+		t.Fatalf("state after Esc = %v, want screenInput", next.state)
+	}
+	if next.operationKind != operationIdle {
+		t.Fatalf("operationKind after Esc = %v, want operationIdle", next.operationKind)
 	}
 }
