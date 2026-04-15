@@ -29,7 +29,7 @@ func initialModel() model {
 	pi.Prompt = ""
 
 	ci := textinput.New()
-	ci.Placeholder = "Describe your forged item..."
+	ci.Placeholder = ""
 	ci.CharLimit = 160
 	ci.Width = 56
 	ci.Prompt = ""
@@ -151,7 +151,7 @@ func (m model) View() string {
 		m.height,
 		lipgloss.Left,
 		lipgloss.Bottom,
-		panel,
+		lipgloss.NewStyle().PaddingLeft(2).Render(panel),
 		lipgloss.WithWhitespaceBackground(colorBg),
 	)
 }

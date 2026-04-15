@@ -3,16 +3,16 @@ package main
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	colorBg      = lipgloss.Color("#0B0A10")
-	colorBgB     = lipgloss.Color("#120E1A")
-	colorPanel   = lipgloss.Color("#15121F")
+	colorBg      = lipgloss.Color("#000000")
+	colorBgB     = lipgloss.Color("#0A0A0A")
+	colorPanel   = lipgloss.Color("#0D0D0D")
 	colorRune    = lipgloss.Color("#4DDB80")
 	colorRuneHot = lipgloss.Color("#7EE2A0")
 	colorGold    = lipgloss.Color("#C8A14A")
 	colorText    = lipgloss.Color("#FAFAFA")
 	colorDim     = lipgloss.Color("#7B738F")
 	colorError   = lipgloss.Color("#FF4D5A")
-	colorSigilBg = lipgloss.Color("#110F19")
+	colorSigilBg = lipgloss.Color("#050505")
 )
 
 type uiStyles struct {
