@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"theforge/internal/modsources"
 )
+
+func fmtElapsed(start time.Time) string {
+	if start.IsZero() {
+		return ""
+	}
+	secs := int(time.Since(start).Seconds())
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	return fmt.Sprintf("%dm%ds", secs/60, secs%60)
+}
 
 type sessionShellState struct {
 	events      []sessionEvent
@@ -184,7 +196,24 @@ func (s sessionShellState) render(m model, content string) string {
 }
 
 func (s sessionShellState) renderTopStrip(m model) string {
-	return ""
+	if m.width <= 0 {
+		return ""
+	}
+
+	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
+	boldStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
+
+	var parts []string
+	if bench := strings.TrimSpace(activeBenchLabel(m)); bench != "" {
+		parts = append(parts, boldStyle.Render(bench))
+	}
+	if m.bridgeAlive || m.workshop.Runtime.BridgeAlive {
+		parts = append(parts, dimStyle.Render("runtime online"))
+	} else {
+		parts = append(parts, dimStyle.Render("runtime offline"))
+	}
+
+	return dimStyle.Render(strings.Join(parts, "  ·  "))
 }
 
 const forgeVersion = "v0.1.0"
@@ -259,25 +288,36 @@ func (s sessionShellState) renderFeedContainer(m model, content string) string {
 
 func renderOperationLine(m model) string {
 	label := strings.TrimSpace(m.operationLabel)
+	elapsed := fmtElapsed(m.operationStartedAt)
+	elapsedSuffix := ""
+	if elapsed != "" {
+		elapsedSuffix = " " + lipgloss.NewStyle().Foreground(colorDim).Render(elapsed)
+	}
+
 	switch m.operationKind {
 	case operationForging:
 		if label == "" {
 			label = "item"
 		}
 		if m.operationStale {
-			return styles.Hint.Render("Still waiting for the forge...")
+			return styles.Hint.Render("Still waiting for the forge...") + elapsedSuffix
 		}
-		return styles.Injecting.Render("⟳ Forging " + label)
+		stageLabel := strings.TrimSpace(m.stageLabel)
+		detail := label
+		if stageLabel != "" {
+			detail = label + " · " + stageLabel
+		}
+		return styles.Injecting.Render("⟳ Forging "+detail) + elapsedSuffix
 	case operationDirector:
 		if label == "" {
 			label = "director"
 		}
-		return styles.Injecting.Render("⟳ Waiting on " + label)
+		return styles.Injecting.Render("⟳ Waiting on "+label) + elapsedSuffix
 	case operationInjecting:
 		if label == "" {
 			label = "item"
 		}
-		return styles.Injecting.Render("⟳ Injecting " + label + " into Terraria")
+		return styles.Injecting.Render("⟳ Injecting "+label+" into Terraria") + elapsedSuffix
 	default:
 		return ""
 	}
@@ -296,10 +336,15 @@ func (s sessionShellState) renderPinnedMemoryBlock() string {
 }
 
 func (s sessionShellState) renderCommandBar(m model) string {
-	return strings.Join([]string{
-		styles.Hint.Render(strings.Repeat("─", shellContentWidth(m))),
-		styles.Meta.Render(">") + " " + m.commandInput.View(),
-	}, "\n")
+	width := shellContentWidth(m)
+	hintText := "/ for commands · esc to cancel · ctrl+c to quit"
+	if len(hintText) > width {
+		hintText = hintText[:width]
+	}
+	hint := styles.Hint.Render(hintText)
+	sep := styles.Hint.Render(strings.Repeat("─", width))
+	prompt := styles.Meta.Render(">") + " " + m.commandInput.View()
+	return strings.Join([]string{hint, sep, prompt}, "\n")
 }
 
 func shellContentWidth(m model) int {
