@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestAutocompleteFiltersOnPrefix(t *testing.T) {
@@ -73,5 +75,60 @@ func TestAutocompleteDrawerHighlightsSelectedRow(t *testing.T) {
 	got := m.View()
 	if !strings.Contains(got, "/variants") {
 		t.Fatalf("view = %q, want /variants in drawer", got)
+	}
+}
+
+func TestAutocompleteDownArrowMovesSelection(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.commandInput.SetValue("/")
+	m.autocompleteIndex = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	next := updated.(model)
+
+	if next.autocompleteIndex != 1 {
+		t.Fatalf("autocompleteIndex after Down = %d, want 1", next.autocompleteIndex)
+	}
+}
+
+func TestAutocompleteUpArrowMovesSelection(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.commandInput.SetValue("/")
+	m.autocompleteIndex = 2
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	next := updated.(model)
+
+	if next.autocompleteIndex != 1 {
+		t.Fatalf("autocompleteIndex after Up = %d, want 1", next.autocompleteIndex)
+	}
+}
+
+func TestAutocompleteTabCompletesCommand(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.commandInput.SetValue("/fo")
+	m.autocompleteIndex = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next := updated.(model)
+
+	if next.commandInput.Value() != "/forge " {
+		t.Fatalf("input after Tab = %q, want \"/forge \"", next.commandInput.Value())
+	}
+}
+
+func TestAutocompleteEscDismissesDrawer(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.commandInput.SetValue("/")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(model)
+
+	if got := filterAutocomplete(next.commandInput.Value()); got != nil {
+		t.Fatalf("autocomplete still active after Esc, input = %q", next.commandInput.Value())
 	}
 }
