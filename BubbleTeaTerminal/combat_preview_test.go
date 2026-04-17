@@ -129,9 +129,9 @@ func TestCombatPreviewProfileForSpearUsesThrust(t *testing.T) {
 }
 
 func TestCombatPreviewProfileForGunBowStaffUsesShoot(t *testing.T) {
-	for _, subType := range []string{"Gun", "Bow", "Staff"} {
+	for _, subType := range []string{"Gun", "Bow", "Staff", "Cannon"} {
 		t.Run(subType, func(t *testing.T) {
-			profile := combatPreviewProfileFor(craftedItem{subType: subType}, nil)
+			profile := combatPreviewProfileFor(craftedItem{contentType: "Weapon", subType: subType}, nil)
 			if profile.kind != combatPreviewShoot {
 				t.Fatalf("profile.kind = %v, want shoot", profile.kind)
 			}

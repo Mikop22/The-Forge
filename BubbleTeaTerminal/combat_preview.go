@@ -158,7 +158,7 @@ func combatPreviewKindFromText(raw string) (combatPreviewKind, bool) {
 		return combatPreviewSwing, true
 	case "spear", "rapier", "lance":
 		return combatPreviewThrust, true
-	case "gun", "bow", "staff", "ranged", "magic", "shoot":
+	case "gun", "bow", "staff", "cannon", "ranged", "magic", "shoot":
 		return combatPreviewShoot, true
 	default:
 		return 0, false
