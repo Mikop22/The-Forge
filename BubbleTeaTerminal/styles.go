@@ -27,6 +27,7 @@ type uiStyles struct {
 	Progress     lipgloss.Style
 	Inventory    lipgloss.Style
 	Injecting    lipgloss.Style
+	Pending      lipgloss.Style
 	PromptInput  lipgloss.Style
 	Ember        lipgloss.Style
 	SigilColumn  lipgloss.Style
@@ -79,6 +80,8 @@ func newStyles() uiStyles {
 		Injecting: lipgloss.NewStyle().
 			Foreground(colorGold).
 			Bold(true),
+		Pending: lipgloss.NewStyle().
+			Foreground(colorGold),
 		PromptInput: lipgloss.NewStyle().
 			Foreground(colorText),
 		Ember: lipgloss.NewStyle().
@@ -96,6 +99,7 @@ func newStyles() uiStyles {
 		SpriteFrame: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorDim).
+			Background(lipgloss.Color("#2C2C2C")).
 			Padding(0, 1),
 		StatsFrame: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

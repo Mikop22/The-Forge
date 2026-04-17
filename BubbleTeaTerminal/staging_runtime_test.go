@@ -325,3 +325,23 @@ func TestStagingViewInjectionShowsElapsedTime(t *testing.T) {
 		t.Fatalf("stagingView() contains duplicate static injecting line; should be removed")
 	}
 }
+
+func TestStagingViewItemPendingUsesDistinctMarker(t *testing.T) {
+	m := initialModel()
+	item := craftedItem{label: "Storm Brand", contentType: "Weapon", subType: "Staff"}
+	m.previewItem = &item
+	m.workshop.SetBenchFromCraftedItem(item, map[string]interface{}{})
+	m.revealPhase = 3
+	m.injectStatus = "item_pending"
+
+	view := m.stagingView()
+	if strings.Contains(view, "appeared in your inventory") {
+		t.Fatalf("stagingView() item_pending = %q, want 'appeared in your inventory' absent", view)
+	}
+	if !strings.Contains(view, "enter a world") {
+		t.Fatalf("stagingView() item_pending = %q, want 'enter a world' text", view)
+	}
+	if strings.Contains(view, "✔ Item appeared") {
+		t.Fatalf("stagingView() item_pending uses success marker, want pending marker")
+	}
+}

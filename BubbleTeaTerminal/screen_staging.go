@@ -383,7 +383,7 @@ func (m model) stagingView() string {
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Item appeared in your inventory!"))
 		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
 	case m.injectStatus == "item_pending":
-		headerLines = append(headerLines, "", styles.Success.Render("✔ Item registered — enter a world to receive it"))
+		headerLines = append(headerLines, "", styles.Pending.Render("◐ Item registered — enter a world to receive it"))
 		if m.injectDetail != "" {
 			headerLines = append(headerLines, styles.Hint.Render(m.injectDetail))
 		}
