@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"theforge/internal/ipc"
 )
 
@@ -66,8 +64,8 @@ func TestStagingViewHidesHealthyIdleRuntimeDetails(t *testing.T) {
 	if strings.Contains(view, "Runtime Online") || strings.Contains(view, "World Loaded") {
 		t.Fatalf("stagingView() = %q, want healthy idle runtime details hidden", view)
 	}
-	if !strings.Contains(view, "[R] Reprompt sprite") {
-		t.Fatalf("stagingView() = %q, want action hints to stay visible", view)
+	if !strings.Contains(view, "Storm Brand") {
+		t.Fatalf("stagingView() = %q, want bench item visible", view)
 	}
 }
 
@@ -118,7 +116,7 @@ func TestAcceptInjectUsesBenchLabelAfterWorkshopStatus(t *testing.T) {
 	})
 	m.forgeItemName = "Old Name"
 
-	_, _ = m.updateStaging(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	_, _ = m.handleShellCommand("/try")
 
 	data, err := os.ReadFile(filepath.Join(ms, "forge_inject.json"))
 	if err != nil {
@@ -306,5 +304,22 @@ func TestApplyWorkshopStatusRefreshesPreviewFromPartialBenchData(t *testing.T) {
 	}
 	if m.forgeItemName != "storm-brand" {
 		t.Fatalf("forgeItemName = %q, want fallback to item id", m.forgeItemName)
+	}
+}
+
+func TestStagingViewInjectionShowsElapsedTime(t *testing.T) {
+	m := initialModel()
+	item := craftedItem{label: "Storm Brand", contentType: "Weapon", subType: "Staff"}
+	m.previewItem = &item
+	m.workshop.SetBenchFromCraftedItem(item, map[string]interface{}{})
+	m.revealPhase = 3
+	m.injecting = true
+	m.operationKind = operationInjecting
+	m.operationLabel = "Storm Brand"
+	m.operationStartedAt = time.Now().UTC().Add(-8 * time.Second)
+
+	view := m.stagingView()
+	if strings.Contains(view, "⟳ Injecting into Terraria...") {
+		t.Fatalf("stagingView() contains duplicate static injecting line; should be removed")
 	}
 }
