@@ -1267,3 +1267,42 @@ func TestEscCancelsInFlightForge(t *testing.T) {
 		t.Fatalf("operationKind after Esc = %v, want operationIdle", next.operationKind)
 	}
 }
+
+func TestForgeErrorRetryWithRKey(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.state = screenForge
+	m.forgeErr = "Forge timed out."
+	m.prompt = "radiant sword"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	next := updated.(model)
+
+	if next.state != screenForge {
+		t.Fatalf("state = %v, want screenForge after retry", next.state)
+	}
+	if next.forgeErr != "" {
+		t.Fatalf("forgeErr = %q, want empty after retry", next.forgeErr)
+	}
+	if next.operationKind != operationForging {
+		t.Fatalf("operationKind = %q, want operationForging after retry", next.operationKind)
+	}
+}
+
+func TestForgeErrorEscGoesBackToInput(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.state = screenForge
+	m.forgeErr = "Forge timed out."
+	m.prompt = "radiant sword"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(model)
+
+	if next.state != screenInput {
+		t.Fatalf("state = %v, want screenInput after Esc on error", next.state)
+	}
+	if next.forgeErr != "" {
+		t.Fatalf("forgeErr = %q, want empty after Esc", next.forgeErr)
+	}
+}
