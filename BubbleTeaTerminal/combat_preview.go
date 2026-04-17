@@ -12,6 +12,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type combatPreviewKind int
+
+const (
+	combatPreviewSwing combatPreviewKind = iota
+	combatPreviewThrust
+	combatPreviewShoot
+)
+
+type combatPreviewProfile struct {
+	kind                 combatPreviewKind
+	loopTicks            int
+	projectileDelayTicks int
+	projectileSpeed      float64
+}
+
 func loadPreviewSprite(path string) (image.Image, bool) {
 	if path == "" {
 		return nil, false
@@ -59,6 +74,135 @@ func loadPreviewSprite(path string) (image.Image, bool) {
 	draw.Draw(cropped, cropRect, img, image.Point{X: minX, Y: minY}, draw.Src)
 
 	return cropped, true
+}
+
+func combatPreviewProfileFor(item craftedItem, manifest map[string]interface{}) combatPreviewProfile {
+	kind := combatPreviewKindForItem(item, manifest)
+	loopTicks := combatPreviewLoopTicks(item.stats.UseTime)
+	delayTicks := combatPreviewDelayTicks(loopTicks, kind)
+
+	return combatPreviewProfile{
+		kind:                 kind,
+		loopTicks:            loopTicks,
+		projectileDelayTicks: delayTicks,
+		projectileSpeed:      combatPreviewProjectileSpeed(kind),
+	}
+}
+
+func combatPreviewKindForItem(item craftedItem, manifest map[string]interface{}) combatPreviewKind {
+	if kind, ok := combatPreviewKindFromText(item.subType); ok {
+		return kind
+	}
+
+	mechanics := combatPreviewMechanics(manifest)
+	if kind, ok := combatPreviewKindFromMechanics(mechanics); ok {
+		return kind
+	}
+
+	if kind, ok := combatPreviewKindFromText(item.contentType); ok {
+		return kind
+	}
+
+	if strings.EqualFold(item.contentType, "Weapon") {
+		return combatPreviewSwing
+	}
+
+	return combatPreviewShoot
+}
+
+func combatPreviewMechanics(manifest map[string]interface{}) map[string]interface{} {
+	if manifest == nil {
+		return nil
+	}
+	if mechanics, ok := manifest["mechanics"].(map[string]interface{}); ok {
+		return mechanics
+	}
+	return manifest
+}
+
+func combatPreviewKindFromMechanics(mechanics map[string]interface{}) (combatPreviewKind, bool) {
+	if mechanics == nil {
+		return 0, false
+	}
+
+	useStyle := strings.ToLower(manifestString(mechanics, "use_style", "useStyle", "use_style_name"))
+	switch {
+	case useStyle == "shoot" || useStyle == "ranged" || useStyle == "magic" || useStyle == "gun" || useStyle == "bow" || useStyle == "staff":
+		return combatPreviewShoot, true
+	case useStyle == "thrust" || useStyle == "rapier":
+		return combatPreviewThrust, true
+	case useStyle == "swing" || useStyle == "melee" || useStyle == "slash":
+		return combatPreviewSwing, true
+	}
+
+	damageClass := strings.ToLower(manifestString(mechanics, "damage_class", "damageClass", "damage_type"))
+	switch {
+	case strings.Contains(damageClass, "ranged") || strings.Contains(damageClass, "magic") || strings.Contains(damageClass, "summon"):
+		return combatPreviewShoot, true
+	case strings.Contains(damageClass, "thrust"):
+		return combatPreviewThrust, true
+	case strings.Contains(damageClass, "melee"):
+		return combatPreviewSwing, true
+	}
+
+	if manifestString(mechanics, "shoot_projectile", "shootProjectile", "projectile") != "" {
+		return combatPreviewShoot, true
+	}
+
+	return 0, false
+}
+
+func combatPreviewKindFromText(raw string) (combatPreviewKind, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "sword", "melee", "slash", "shortsword", "broadsword", "axe", "hammer":
+		return combatPreviewSwing, true
+	case "spear", "rapier", "lance":
+		return combatPreviewThrust, true
+	case "gun", "bow", "staff", "ranged", "magic", "shoot":
+		return combatPreviewShoot, true
+	default:
+		return 0, false
+	}
+}
+
+func combatPreviewLoopTicks(useTime int) int {
+	if useTime <= 0 {
+		return 16
+	}
+
+	ticks := int(math.Round(float64(useTime) * 0.75))
+	if ticks < 8 {
+		ticks = 8
+	}
+	if ticks > 24 {
+		ticks = 24
+	}
+	return ticks
+}
+
+func combatPreviewDelayTicks(loopTicks int, kind combatPreviewKind) int {
+	delay := loopTicks / 4
+	switch kind {
+	case combatPreviewThrust:
+		delay = loopTicks / 5
+	case combatPreviewShoot:
+		delay = loopTicks / 3
+	}
+	if delay < 1 {
+		delay = 1
+	}
+	return delay
+}
+
+func combatPreviewProjectileSpeed(kind combatPreviewKind) float64 {
+	switch kind {
+	case combatPreviewThrust:
+		return 9.5
+	case combatPreviewShoot:
+		return 14
+	default:
+		return 7.5
+	}
 }
 
 type previewCanvas struct {

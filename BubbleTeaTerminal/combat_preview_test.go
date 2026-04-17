@@ -113,3 +113,43 @@ func TestPreviewCanvasTransparentPixelsPreserveBackground(t *testing.T) {
 		}
 	}
 }
+
+func TestCombatPreviewProfileForSwordUsesSwing(t *testing.T) {
+	profile := combatPreviewProfileFor(craftedItem{subType: "Sword"}, nil)
+	if profile.kind != combatPreviewSwing {
+		t.Fatalf("profile.kind = %v, want swing", profile.kind)
+	}
+}
+
+func TestCombatPreviewProfileForSpearUsesThrust(t *testing.T) {
+	profile := combatPreviewProfileFor(craftedItem{subType: "Spear"}, nil)
+	if profile.kind != combatPreviewThrust {
+		t.Fatalf("profile.kind = %v, want thrust", profile.kind)
+	}
+}
+
+func TestCombatPreviewProfileForGunBowStaffUsesShoot(t *testing.T) {
+	for _, subType := range []string{"Gun", "Bow", "Staff"} {
+		t.Run(subType, func(t *testing.T) {
+			profile := combatPreviewProfileFor(craftedItem{subType: subType}, nil)
+			if profile.kind != combatPreviewShoot {
+				t.Fatalf("profile.kind = %v, want shoot", profile.kind)
+			}
+		})
+	}
+}
+
+func TestCombatPreviewProfileUsesUseTimeForLoopLength(t *testing.T) {
+	fast := combatPreviewProfileFor(craftedItem{stats: itemStats{UseTime: 8}}, nil)
+	slow := combatPreviewProfileFor(craftedItem{stats: itemStats{UseTime: 40}}, nil)
+
+	if fast.loopTicks != 8 {
+		t.Fatalf("fast.loopTicks = %d, want 8", fast.loopTicks)
+	}
+	if slow.loopTicks != 24 {
+		t.Fatalf("slow.loopTicks = %d, want 24", slow.loopTicks)
+	}
+	if fast.loopTicks >= slow.loopTicks {
+		t.Fatalf("loopTicks did not increase with use time: fast=%d slow=%d", fast.loopTicks, slow.loopTicks)
+	}
+}
