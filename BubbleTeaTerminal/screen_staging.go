@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/png"
 	"math"
 	"os"
 	"path/filepath"
@@ -659,52 +658,17 @@ func isTransparent(c color.Color) bool {
 // foreground, bottom pixel as background. Transparent pixels use the
 // terminal default. Sprites are typically 32×32 or 64×64.
 func renderSprite(path string) string {
-	if path == "" {
+	img, ok := loadPreviewSprite(path)
+	if !ok {
 		return ""
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
+	return renderSpriteImage(img)
+}
 
-	img, _, err := image.Decode(f)
-	if err != nil {
-		return ""
-	}
-
+func renderSpriteImage(img image.Image) string {
 	bounds := img.Bounds()
-	w := bounds.Max.X - bounds.Min.X
-	h := bounds.Max.Y - bounds.Min.Y
-
-	// Find the bounding box of non-transparent pixels to crop whitespace.
-	minX, minY, maxX, maxY := w, h, 0, 0
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			if !isTransparent(img.At(x, y)) {
-				if x < minX {
-					minX = x
-				}
-				if y < minY {
-					minY = y
-				}
-				if x > maxX {
-					maxX = x
-				}
-				if y > maxY {
-					maxY = y
-				}
-			}
-		}
-	}
-
-	if maxX < minX || maxY < minY {
-		return "" // fully transparent
-	}
-
-	// Crop to bounding box.
-	cropW := maxX - minX + 1
-	cropH := maxY - minY + 1
+	cropW := bounds.Dx()
+	cropH := bounds.Dy()
 
 	// Scale down if the sprite is too large for the terminal.
 	// Target max ~20 columns wide, ~16 rows tall (32 pixel rows at 2px/char).
@@ -733,8 +697,8 @@ func renderSprite(path string) string {
 
 	// Sample pixels with scaling.
 	pixel := func(px, py int) color.Color {
-		sx := minX + px*scale
-		sy := minY + py*scale
+		sx := bounds.Min.X + px*scale
+		sy := bounds.Min.Y + py*scale
 		if sx >= bounds.Max.X || sy >= bounds.Max.Y {
 			return color.Transparent
 		}
