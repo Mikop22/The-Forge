@@ -345,3 +345,37 @@ func TestStagingViewItemPendingUsesDistinctMarker(t *testing.T) {
 		t.Fatalf("stagingView() item_pending uses success marker, want pending marker")
 	}
 }
+
+func TestStagingCommandModeEntryClearsWorkshopNotice(t *testing.T) {
+	m := initialModel()
+	item := craftedItem{label: "Storm Brand", contentType: "Weapon", subType: "Staff"}
+	m.previewItem = &item
+	m.workshop.SetBenchFromCraftedItem(item, map[string]interface{}{})
+	m.revealPhase = 3
+	m.workshopNotice = "Director request sent."
+	m.state = screenStaging
+
+	updated, _ := m.updateStaging(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	next := updated.(model)
+
+	if next.workshopNotice != "" {
+		t.Fatalf("workshopNotice = %q, want empty after entering command mode", next.workshopNotice)
+	}
+}
+
+func TestStagingTabEntryClearsWorkshopNotice(t *testing.T) {
+	m := initialModel()
+	item := craftedItem{label: "Storm Brand", contentType: "Weapon", subType: "Staff"}
+	m.previewItem = &item
+	m.workshop.SetBenchFromCraftedItem(item, map[string]interface{}{})
+	m.revealPhase = 3
+	m.workshopNotice = "Director request sent."
+	m.state = screenStaging
+
+	updated, _ := m.updateStaging(tea.KeyMsg{Type: tea.KeyTab})
+	next := updated.(model)
+
+	if next.workshopNotice != "" {
+		t.Fatalf("workshopNotice = %q after Tab, want empty", next.workshopNotice)
+	}
+}
