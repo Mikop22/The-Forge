@@ -91,7 +91,7 @@ POSITIVE_TEMPLATE = (
     "clean silhouette, high contrast{lora_trigger}"
 )
 LORA_TRIGGER_WORD = "terraria style"
-LORA_SCALE = 0.85
+LORA_SCALE = 0.65
 IMG2IMG_VARIANTS = 4
 HIDDEN_AUDITION_MIN_VARIANTS = 2
 
@@ -188,6 +188,40 @@ def _resolve_fal_key(explicit_key: str | None = None) -> str:
     return key
 
 
+_GATE_MESSAGES = {
+    "center_background_cleanup": (
+        "Sprite has background noise — try a simpler description or reduce LoRA scale"
+    ),
+    "min_contrast_check": (
+        "Sprite lacks contrast — try a palette with more distinct light/dark values"
+    ),
+    "aspect_ratio_check": (
+        "Sprite size ratio is off — the item may be too wide or too tall for a 32×32 icon"
+    ),
+    "min_pixel_count": (
+        "Sprite is nearly empty — the model didn't produce enough visible content"
+    ),
+    "max_pixel_count": (
+        "Sprite fills too much of the canvas — try adding 'small icon' or 'centered' to the description"
+    ),
+}
+
+
+def friendly_generation_error(raw: str) -> str:
+    """Map raw exception/gate messages to user-readable strings."""
+    lower = raw.lower()
+    if "sprite gates:" in lower:
+        gate = raw.split("sprite gates:")[-1].strip().split()[0].rstrip(".,")
+        if gate in _GATE_MESSAGES:
+            return _GATE_MESSAGES[gate]
+        return f"Sprite failed quality check ({gate}) — try rephrasing the description"
+    if "fal_key" in lower or "fal_api_key" in lower:
+        return "FAL API key missing — set FAL_KEY in your .env file"
+    if "timeout" in lower or "timed out" in lower:
+        return "Generation timed out — the image service may be slow, try again"
+    return raw
+
+
 def _extract_projectile_name(manifest: dict) -> str:
     """Best-effort extraction of a projectile class name from the manifest.
 
@@ -220,6 +254,50 @@ def build_prompt(
         lora_trigger=lora_trigger,
         orientation=orientation,
     )
+
+
+def _enrich_description(
+    description: str,
+    *,
+    item_name: str = "",
+    item_type: str = "",
+    sub_type: str = "",
+    color_palette: list[str] | None = None,
+) -> str:
+    """Expand a terse visual description into a part-by-part prompt for FLUX."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+
+    palette_str = ", ".join(color_palette) if color_palette else ""
+
+    system = (
+        "You are a pixel art art director for a Terraria-style game. "
+        "Expand the given weapon description into a concise visual prompt for an image generation model.\n\n"
+        "Rules:\n"
+        "- Write a single FLOWING SENTENCE — no bullet points, no colons, no semicolons\n"
+        "- Name each visible weapon part (blade, edge, crossguard, handle, pommel) and give each a color and material\n"
+        "- Add ONE defining surface detail implied by the theme (crystal facets, frost cracks, rune carvings, lava veins, etc)\n"
+        "- Use plain color words — never hex codes\n"
+        "- Do NOT mention backgrounds, scenes, environments, or story\n"
+        "- Under 45 words. Output ONLY the sentence — no preamble, no label, no quotes."
+    )
+
+    user_msg = (
+        f"Item: {item_name}\n"
+        f"Type: {item_type} / {sub_type}\n"
+        f"Description: {description}\n"
+        f"Palette: {palette_str}"
+    )
+
+    try:
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.7, timeout=30)
+        result = llm.invoke([SystemMessage(content=system), HumanMessage(content=user_msg)])
+        enriched = result.content.strip()
+        logger.info("Enriched description: %s", enriched)
+        return enriched
+    except Exception as exc:
+        logger.warning("Description enrichment failed (%s); using original", exc)
+        return description
 
 
 def _download_reference(url: str) -> Image.Image:
@@ -379,7 +457,7 @@ class ArtistAgent:
             logger.exception("Generation failed for %s", parsed.item_name)
             return PixelsmithOutput(
                 status="error",
-                error=PixelsmithError(code="GENERATION", message=str(exc)),
+                error=PixelsmithError(code="GENERATION", message=friendly_generation_error(str(exc))),
             ).model_dump()
 
     def generate_hidden_audition_finalists(
@@ -655,7 +733,7 @@ class ArtistAgent:
             # Edit endpoint has a narrower schema — only include supported fields
             payload = {
                 "prompt": prompt,
-                "guidance_scale": 5,
+                "guidance_scale": 7,
                 "num_inference_steps": 28,
                 "image_size": GENERATION_SIZE,
                 "num_images": 1,
@@ -668,7 +746,7 @@ class ArtistAgent:
             payload = {
                 "prompt": prompt,
                 "negative_prompt": "",
-                "guidance_scale": 5,
+                "guidance_scale": 7,
                 "num_inference_steps": 28,
                 "image_size": GENERATION_SIZE,
                 "num_images": 1,
@@ -812,8 +890,15 @@ class ArtistAgent:
             )
             n_variants = IMG2IMG_VARIANTS
         else:
-            prompt = build_prompt(
+            enriched = _enrich_description(
                 parsed.visuals.description,
+                item_name=parsed.item_name,
+                item_type=parsed.type,
+                sub_type=parsed.sub_type,
+                color_palette=parsed.visuals.color_palette,
+            )
+            prompt = build_prompt(
+                enriched,
                 lora_loaded=self._lora_loaded,
                 orientation=orientation,
             )
@@ -852,8 +937,15 @@ class ArtistAgent:
                 parsed.visuals.description, reference_url, orientation=orientation
             )
         else:
-            prompt = build_prompt(
+            enriched = _enrich_description(
                 parsed.visuals.description,
+                item_name=parsed.item_name,
+                item_type=parsed.type,
+                sub_type=parsed.sub_type,
+                color_palette=parsed.visuals.color_palette,
+            )
+            prompt = build_prompt(
+                enriched,
                 lora_loaded=self._lora_loaded,
                 orientation=orientation,
             )
