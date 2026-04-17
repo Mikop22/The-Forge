@@ -516,6 +516,76 @@ func TestStagingCommandModeLocalCommandsRenderVisibleResponse(t *testing.T) {
 	}
 }
 
+func stagingPreviewTestModel(t *testing.T, compact bool, contentWidth int) model {
+	t.Helper()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	modSources := filepath.Join(home, "ModSources")
+	t.Setenv("FORGE_MOD_SOURCES_DIR", modSources)
+	if err := os.MkdirAll(modSources, 0755); err != nil {
+		t.Fatalf("mkdir mod sources: %v", err)
+	}
+
+	m := initialModel()
+	m.state = screenStaging
+	m.termCompact = compact
+	m.contentWidth = contentWidth
+	m.revealPhase = 3
+	m.bridgeAlive = true
+	m.workshop.Runtime.BridgeAlive = true
+	m.previewItem = &craftedItem{
+		label:       "Storm Brand",
+		contentType: "Weapon",
+		subType:     "Staff",
+		stats: itemStats{
+			Damage:  18,
+			UseTime: 22,
+		},
+	}
+	m.workshop.Bench = workshopBench{
+		ItemID: "storm-brand",
+		Label:  "Storm Brand",
+		Manifest: map[string]interface{}{
+			"type":     "Weapon",
+			"sub_type": "Staff",
+		},
+	}
+	return m
+}
+
+func TestStagingViewRendersCombatPreviewForBenchItem(t *testing.T) {
+	m := stagingPreviewTestModel(t, false, 96)
+
+	got := m.stagingView()
+	if !strings.Contains(got, "Combat Preview") {
+		t.Fatalf("stagingView() = %q, want Combat Preview panel for the bench item", got)
+	}
+}
+
+func TestStagingViewHidesCombatPreviewInVeryCompactTerminal(t *testing.T) {
+	m := stagingPreviewTestModel(t, true, 36)
+
+	got := m.stagingView()
+	if strings.Contains(got, "Combat Preview") {
+		t.Fatalf("stagingView() = %q, want compact terminals to omit the combat preview", got)
+	}
+	if !strings.Contains(got, "Storm Brand") || !strings.Contains(got, "Stats") {
+		t.Fatalf("stagingView() = %q, want compact staging to keep the static bench panels", got)
+	}
+}
+
+func TestStagingViewPreviewLinesDoNotExceedTerminalWidth(t *testing.T) {
+	m := stagingPreviewTestModel(t, false, 96)
+
+	got := m.stagingView()
+	for i, line := range strings.Split(got, "\n") {
+		if width := lipgloss.Width(line); width > m.contentWidth {
+			t.Fatalf("stagingView line %d width = %d, want <= %d\n%s", i, width, m.contentWidth, got)
+		}
+	}
+}
+
 func TestInputShellTryUsesActiveBench(t *testing.T) {
 	home := t.TempDir()
 	modSources := filepath.Join(home, "ModSources")
