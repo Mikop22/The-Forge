@@ -7,22 +7,23 @@ import (
 )
 
 type autocompleteEntry struct {
-	Slash   string
-	ArgHint string
-	Desc    string
+	Slash        string
+	ArgHint      string
+	Desc         string
+	RequiresBench bool
 }
 
 var autocompleteRegistry = []autocompleteEntry{
-	{"/forge", "<prompt>", "Generate a new item from scratch"},
-	{"/variants", "<describe changes>", "Generate shelf variants from the bench"},
-	{"/bench", "<id or number>", "Set a shelf variant as the active bench"},
-	{"/try", "", "Reinject the current bench item into Terraria"},
-	{"/restore", "baseline | live", "Restore bench to a previous state"},
-	{"/status", "", "Show bench label and runtime state"},
-	{"/memory", "", "Show pinned memory notes"},
-	{"/what-changed", "", "Summarise changes since last bench"},
-	{"/clear", "", "Clear the active bench and shelf"},
-	{"/help", "", "List all available commands"},
+	{"/forge", "<prompt>", "Generate a new item from scratch", false},
+	{"/variants", "<describe changes>", "Generate shelf variants from the bench", true},
+	{"/bench", "<id or number>", "Set a shelf variant as the active bench", true},
+	{"/try", "", "Reinject the current bench item into Terraria", true},
+	{"/restore", "baseline | live", "Restore bench to a previous state", true},
+	{"/status", "", "Show bench label and runtime state", false},
+	{"/memory", "", "Show pinned memory notes", false},
+	{"/what-changed", "", "Summarise changes since last bench", false},
+	{"/clear", "", "Clear the active bench and shelf", false},
+	{"/help", "", "List all available commands", false},
 }
 
 // renderAutocompleteDrawer renders a two-column command list below the prompt.
@@ -47,11 +48,12 @@ func renderAutocompleteDrawer(m model) string {
 		idx = len(entries) - 1
 	}
 
-	// slashWidth must be >= the widest Slash+ArgHint pair in autocompleteRegistry.
-	// Current widest: "/restore baseline | live" = 24 chars. 2 chars of margin.
+	hasBench := m.hasActiveWorkshopBench()
 	const slashWidth = 26
 	contentW := shellContentWidth(m)
 	descWidth := max(1, contentW-slashWidth)
+
+	unavailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A4357"))
 	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
 	selSlash := lipgloss.NewStyle().Foreground(colorRune).Bold(true)
 	selDesc := lipgloss.NewStyle().Foreground(colorText)
@@ -62,9 +64,13 @@ func renderAutocompleteDrawer(m model) string {
 		if e.ArgHint != "" {
 			name += " " + e.ArgHint
 		}
-		if i == idx {
+		unavailable := e.RequiresBench && !hasBench
+		switch {
+		case i == idx && !unavailable:
 			lines = append(lines, selSlash.Width(slashWidth).Render(name)+selDesc.Width(descWidth).Render(e.Desc))
-		} else {
+		case unavailable:
+			lines = append(lines, unavailStyle.Width(slashWidth).Render(name)+unavailStyle.Width(descWidth).Render(e.Desc+" (no bench)"))
+		default:
 			lines = append(lines, dimStyle.Width(slashWidth).Render(name)+dimStyle.Width(descWidth).Render(e.Desc))
 		}
 	}

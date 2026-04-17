@@ -221,3 +221,25 @@ func TestAutocompleteEscDismissesDrawer(t *testing.T) {
 		t.Fatalf("autocomplete still active after Esc, input = %q", next.commandInput.Value())
 	}
 }
+
+func TestAutocompleteDrawerDimsBenchCommandsWhenNoBench(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.commandInput.SetValue("/")
+	m.width = 120
+	m.contentWidth = 116
+
+	drawer := renderAutocompleteDrawer(m)
+	if !strings.Contains(drawer, "/forge") {
+		t.Fatalf("drawer = %q, want /forge present", drawer)
+	}
+	if !strings.Contains(drawer, "/variants") {
+		t.Fatalf("drawer = %q, want /variants present (dimmed)", drawer)
+	}
+
+	m.workshop.Bench.ItemID = "storm-brand"
+	drawer2 := renderAutocompleteDrawer(m)
+	if !strings.Contains(drawer2, "/variants") {
+		t.Fatalf("drawer2 = %q, want /variants present when bench active", drawer2)
+	}
+}
