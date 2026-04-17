@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"theforge/internal/ipc"
 )
 
@@ -64,8 +66,8 @@ func TestStagingViewHidesHealthyIdleRuntimeDetails(t *testing.T) {
 	if strings.Contains(view, "Runtime Online") || strings.Contains(view, "World Loaded") {
 		t.Fatalf("stagingView() = %q, want healthy idle runtime details hidden", view)
 	}
-	if !strings.Contains(view, "Storm Brand") {
-		t.Fatalf("stagingView() = %q, want bench item visible", view)
+	if !strings.Contains(view, "[R] Reprompt sprite") {
+		t.Fatalf("stagingView() = %q, want action hints to stay visible", view)
 	}
 }
 
@@ -116,7 +118,7 @@ func TestAcceptInjectUsesBenchLabelAfterWorkshopStatus(t *testing.T) {
 	})
 	m.forgeItemName = "Old Name"
 
-	_, _ = m.handleShellCommand("/try")
+	_, _ = m.updateStaging(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 
 	data, err := os.ReadFile(filepath.Join(ms, "forge_inject.json"))
 	if err != nil {

@@ -107,6 +107,54 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
+		if m.previewMode == previewModeReprompt {
+			switch key.Type {
+			case tea.KeyEsc:
+				m.previewMode = previewModeActions
+				m.previewInput.SetValue("")
+				return m, nil
+			case tea.KeyEnter:
+				feedback := strings.TrimSpace(m.previewInput.Value())
+				if feedback == "" {
+					m.injectErr = "Reprompt feedback cannot be empty."
+					return m, nil
+				}
+				m.pendingManifest = m.forgeManifest
+				m.pendingArtFeedback = feedback
+				m.previewMode = previewModeActions
+				m.previewInput.SetValue("")
+				m.injectErr = ""
+				return m.enterForge()
+			}
+			var cmd tea.Cmd
+			m.previewInput, cmd = m.previewInput.Update(msg)
+			return m, cmd
+		}
+
+		if m.previewMode == previewModeStats {
+			switch key.String() {
+			case "esc", "enter":
+				m.previewMode = previewModeActions
+				return m, nil
+			case "up", "k":
+				if m.statEditIndex > 0 {
+					m.statEditIndex--
+				}
+				return m, nil
+			case "down", "j":
+				if m.statEditIndex < len(previewStatFields)-1 {
+					m.statEditIndex++
+				}
+				return m, nil
+			case "left", "h", "-":
+				m.adjustPreviewStat(-1)
+				return m, nil
+			case "right", "l", "+":
+				m.adjustPreviewStat(1)
+				return m, nil
+			}
+		}
+
 		if m.commandMode {
 			switch key.Type {
 			case tea.KeyEsc:
@@ -114,44 +162,7 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commandInput.Blur()
 				m.commandInput.SetValue("")
 				return m, nil
-			case tea.KeyDown:
-				if entries := filterAutocomplete(m.commandInput.Value()); entries != nil {
-					m.autocompleteIndex++
-					if m.autocompleteIndex >= len(entries) {
-						m.autocompleteIndex = len(entries) - 1
-					}
-					return m, nil
-				}
-			case tea.KeyUp:
-				if entries := filterAutocomplete(m.commandInput.Value()); entries != nil {
-					m.autocompleteIndex--
-					if m.autocompleteIndex < 0 {
-						m.autocompleteIndex = 0
-					}
-					return m, nil
-				}
-			case tea.KeyTab:
-				if entries := filterAutocomplete(m.commandInput.Value()); entries != nil && m.autocompleteIndex < len(entries) {
-					m.commandInput.SetValue(entries[m.autocompleteIndex].Slash + " ")
-					m.commandInput.CursorEnd()
-					m.autocompleteIndex = 0
-					return m, nil
-				}
 			case tea.KeyEnter:
-				if entries := filterAutocomplete(m.commandInput.Value()); entries != nil && m.autocompleteIndex < len(entries) {
-					selected := entries[m.autocompleteIndex]
-					if selected.ArgHint == "" {
-						m.commandMode = false
-						m.commandInput.Blur()
-						m.commandInput.SetValue("")
-						m.autocompleteIndex = 0
-						return m.handleShellCommand(selected.Slash)
-					}
-					m.commandInput.SetValue(selected.Slash + " ")
-					m.commandInput.CursorEnd()
-					m.autocompleteIndex = 0
-					return m, nil
-				}
 				raw := strings.TrimSpace(m.commandInput.Value())
 				if raw == "" {
 					m.commandMode = false
@@ -166,9 +177,6 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			var cmd tea.Cmd
 			m.commandInput, cmd = m.commandInput.Update(msg)
-			if filterAutocomplete(m.commandInput.Value()) == nil {
-				m.autocompleteIndex = 0
-			}
 			return m, cmd
 		}
 
@@ -183,6 +191,60 @@ func (m model) updateStaging(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.workshopNotice = ""
 			return m, nil
+		case "c", "C":
+			m.resetForCraftAnother()
+			return m, nil
+		case "d", "D":
+			m.previewItem = nil
+			m.forgeManifest = nil
+			m.forgeSprPath = ""
+			m.forgeProjPath = ""
+			m.injectErr = ""
+			m.injectStatus = ""
+			m.injectDetail = ""
+			m.state = screenInput
+			m.commandInput.Focus()
+			return m, nil
+		case "r", "R":
+			m.previewMode = previewModeReprompt
+			m.previewInput.Focus()
+			m.injectErr = ""
+			return m, nil
+		case "s", "S":
+			m.previewMode = previewModeStats
+			m.injectErr = ""
+			return m, nil
+		case "a", "A", "enter":
+			if m.injecting {
+				return m, nil // debounce
+			}
+			m.injecting = true
+			m.injectErr = ""
+			m.injectStatus = ""
+			m.injectDetail = ""
+			label := m.forgeItemName
+			if strings.TrimSpace(m.workshop.Bench.Label) != "" {
+				label = m.workshop.Bench.Label
+			}
+			m.operationKind = operationInjecting
+			m.operationLabel = label
+			m.operationStartedAt = time.Now().UTC()
+			m.operationStale = false
+			m.appendFeedEvent(sessionEventKindSystem, "Accept & Inject: "+label)
+			m.appendPreviewHistory()
+			// Always use the instant inject path: write forge_inject.json and
+			// let the ForgeConnector mod pick it up on the next game tick.
+			dir := modsources.Dir()
+			_ = os.Remove(filepath.Join(dir, "forge_connector_status.json"))
+			injectItemName := label
+			if err := ipc.WriteInjectFile(m.forgeManifest, injectItemName, m.forgeSprPath, m.forgeProjPath); err != nil {
+				m.injecting = false
+				m.operationKind = operationIdle
+				m.operationStale = false
+				m.injectErr = err.Error()
+				return m, nil
+			}
+			return m, ipc.PollConnectorStatusCmd(0)
 		}
 	}
 	return m, nil
@@ -319,33 +381,62 @@ func (m model) stagingView() string {
 	switch {
 	case m.injectStatus == "item_injected":
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Item appeared in your inventory!"))
-		headerLines = append(headerLines, styles.Hint.Render("/forge to craft another"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
 	case m.injectStatus == "item_pending":
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Item registered — enter a world to receive it"))
 		if m.injectDetail != "" {
 			headerLines = append(headerLines, styles.Hint.Render(m.injectDetail))
 		}
-		headerLines = append(headerLines, styles.Hint.Render("/forge to craft another"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
 	case m.injectStatus == "inject_failed":
 		headerLines = append(headerLines, "", styles.Error.Render("✘ Injection failed"))
 		if m.injectDetail != "" {
 			headerLines = append(headerLines, styles.Hint.Render(m.injectDetail))
 		}
-		headerLines = append(headerLines, styles.Hint.Render("/try to retry  ·  /forge to start over"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
 	case m.injectStatus == "reload_triggered":
 		headerLines = append(headerLines, "", styles.Success.Render("✔ Mod reloading in Terraria"))
-		headerLines = append(headerLines, styles.Hint.Render("/forge to craft another"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another"))
 	case m.injectStatus == "reload_failed":
 		headerLines = append(headerLines, "", styles.Error.Render("✘ Connector reached but reload failed"))
-		headerLines = append(headerLines, styles.Hint.Render("/try to retry  ·  /forge to start over"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
 	case m.injectStatus == "timeout":
 		headerLines = append(headerLines, "", styles.Error.Render("✘ No response from Terraria"))
-		headerLines = append(headerLines, styles.Hint.Render("/try to retry  ·  /forge to start over"))
+		headerLines = append(headerLines, styles.Hint.Render("[C] Craft Another   [ENTER] Retry"))
 	default:
-		if m.commandMode {
-			headerLines = append(headerLines, "", styles.Subtitle.Render("Director"))
-			headerLines = append(headerLines, styles.PromptInput.Render(m.commandInput.View()))
-			headerLines = append(headerLines, styles.Hint.Render("Enter send  •  Esc cancel"))
+		switch m.previewMode {
+		case previewModeReprompt:
+			headerLines = append(headerLines, "", styles.Subtitle.Render("Reprompt sprite"))
+			headerLines = append(headerLines, styles.PromptInput.Render(m.previewInput.View()))
+			headerLines = append(headerLines, styles.Hint.Render("Enter regenerate  •  Esc cancel"))
+		case previewModeStats:
+			headerLines = append(headerLines, "", styles.Subtitle.Render("Tweak stats"))
+			for i, field := range previewStatFields {
+				cursor := " "
+				if i == m.statEditIndex {
+					cursor = "▸"
+				}
+				value := "—"
+				if statsMap, ok := m.forgeManifest["stats"].(map[string]interface{}); ok {
+					if current, ok := toFloat(statsMap[field.key]); ok {
+						if field.step >= 1 {
+							value = fmt.Sprintf("%.0f", current)
+						} else {
+							value = fmt.Sprintf("%.1f", current)
+						}
+					}
+				}
+				headerLines = append(headerLines, styles.Body.Render(fmt.Sprintf("%s %-10s %s", cursor, field.label, value)))
+			}
+			headerLines = append(headerLines, styles.Hint.Render("↑/↓ field  •  ←/→ adjust  •  Enter done"))
+		default:
+			headerLines = append(headerLines, "", styles.Hint.Render("[R] Reprompt sprite   [S] Tweak stats   [A] Accept & Inject   [D] Discard   [C] Reset"))
+			headerLines = append(headerLines, styles.Hint.Render("Tab or / opens the director command bar"))
+			if m.commandMode {
+				headerLines = append(headerLines, "", styles.Subtitle.Render("Director"))
+				headerLines = append(headerLines, styles.PromptInput.Render(m.commandInput.View()))
+				headerLines = append(headerLines, styles.Hint.Render("Enter send  •  Esc cancel"))
+			}
 		}
 	}
 
@@ -621,10 +712,6 @@ func renderSpriteImage(img image.Image) string {
 	}
 
 	// Render using half-block technique: ▀ with top=fg, bottom=bg.
-	// Transparent pixels use the sprite frame background so they blend
-	// cleanly into the frame rather than falling through to the panel bg.
-	const spriteBg = lipgloss.Color("#2C2C2C")
-	bgStyle := lipgloss.NewStyle().Background(spriteBg)
 	var lines []string
 	for row := 0; row < outH; row += 2 {
 		var lineChars []string
@@ -640,18 +727,14 @@ func renderSpriteImage(img image.Image) string {
 
 			switch {
 			case topTrans && botTrans:
-				lineChars = append(lineChars, bgStyle.Render(" "))
+				lineChars = append(lineChars, " ")
 			case topTrans:
-				// Only bottom pixel visible — ▄ with frame bg behind top half
-				s := lipgloss.NewStyle().
-					Foreground(lipgloss.Color(colorToHex(bottom))).
-					Background(spriteBg)
+				// Only bottom pixel visible — use lower half block ▄
+				s := lipgloss.NewStyle().Foreground(lipgloss.Color(colorToHex(bottom)))
 				lineChars = append(lineChars, s.Render("▄"))
 			case botTrans:
-				// Only top pixel visible — ▀ with frame bg behind bottom half
-				s := lipgloss.NewStyle().
-					Foreground(lipgloss.Color(colorToHex(top))).
-					Background(spriteBg)
+				// Only top pixel visible — use upper half block ▀
+				s := lipgloss.NewStyle().Foreground(lipgloss.Color(colorToHex(top)))
 				lineChars = append(lineChars, s.Render("▀"))
 			default:
 				// Both pixels visible — ▀ with top as fg, bottom as bg
