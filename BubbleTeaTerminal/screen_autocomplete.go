@@ -23,6 +23,7 @@ var autocompleteRegistry = []autocompleteEntry{
 	{"/memory", "", "Show pinned memory notes", false},
 	{"/what-changed", "", "Summarise changes since last bench", false},
 	{"/clear", "", "Clear the active bench and shelf", false},
+	{"/history", "", "List items accepted this session", false},
 	{"/help", "", "List all available commands", false},
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -264,5 +265,36 @@ func TestWorkshopRequestPayloadAlwaysIncludesSnapshotID(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("snapshot_id = %#v, want 0", got)
+	}
+}
+
+func TestHistoryCommandListsCraftedItems(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+	m.craftedItems = []craftedItem{
+		{label: "Storm Brand", contentType: "Weapon", subType: "Staff"},
+		{label: "Frost Blade", contentType: "Weapon", subType: "Sword"},
+	}
+
+	m2, _ := m.handleShellCommand("/history")
+	next := m2.(model)
+
+	if !strings.Contains(next.shellNotice, "Storm Brand") {
+		t.Fatalf("shellNotice = %q, want 'Storm Brand' in history", next.shellNotice)
+	}
+	if !strings.Contains(next.shellNotice, "Frost Blade") {
+		t.Fatalf("shellNotice = %q, want 'Frost Blade' in history", next.shellNotice)
+	}
+}
+
+func TestHistoryCommandEmptySession(t *testing.T) {
+	t.Setenv("FORGE_MOD_SOURCES_DIR", t.TempDir())
+	m := initialModel()
+
+	m2, _ := m.handleShellCommand("/history")
+	next := m2.(model)
+
+	if !strings.Contains(next.shellNotice, "No items") && !strings.Contains(next.shellNotice, "empty") {
+		t.Fatalf("shellNotice = %q, want empty-session message", next.shellNotice)
 	}
 }

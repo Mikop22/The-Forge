@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ const (
 	commandActionMemory      commandAction = "memory"
 	commandActionWhatChanged commandAction = "what_changed"
 	commandActionHelp        commandAction = "help"
+	commandActionClear       commandAction = "clear"
+	commandActionHistory     commandAction = "history"
 	commandActionUnsupported commandAction = "unsupported"
 )
 
@@ -113,6 +116,16 @@ func routeWorkshopCommand(input string, hasActiveBench bool, shelf []workshopVar
 			return commandRoute{Action: commandActionUnsupported, Directive: arg}
 		}
 		return commandRoute{Action: commandActionHelp}
+	case "clear":
+		if strings.TrimSpace(arg) != "" {
+			return commandRoute{Action: commandActionUnsupported, Directive: arg}
+		}
+		return commandRoute{Action: commandActionClear}
+	case "history":
+		if strings.TrimSpace(arg) != "" {
+			return commandRoute{Action: commandActionUnsupported, Directive: arg}
+		}
+		return commandRoute{Action: commandActionHistory}
 	default:
 		return commandRoute{Action: commandActionUnsupported, Directive: arg}
 	}
@@ -120,7 +133,7 @@ func routeWorkshopCommand(input string, hasActiveBench bool, shelf []workshopVar
 
 func isLocalShellInfoAction(action commandAction) bool {
 	switch action {
-	case commandActionStatus, commandActionMemory, commandActionWhatChanged, commandActionHelp:
+	case commandActionStatus, commandActionMemory, commandActionWhatChanged, commandActionHelp, commandActionClear, commandActionHistory:
 		return true
 	default:
 		return false
@@ -151,7 +164,18 @@ func (m model) shellInfoResponse(route commandRoute) string {
 		}
 		return "What changed: bench " + m.workshop.Bench.Label + "; shelf variants " + strconv.Itoa(len(m.workshop.Shelf))
 	case commandActionHelp:
-		return "Commands: /forge, /variants, /bench, /try, /restore, /status, /memory, /what-changed, /help"
+		return "Commands: /forge, /variants, /bench, /try, /restore, /status, /memory, /what-changed, /clear, /history, /help"
+	case commandActionHistory:
+		if len(m.craftedItems) == 0 {
+			return "History: No items accepted this session"
+		}
+		labels := make([]string, len(m.craftedItems))
+		for i, item := range m.craftedItems {
+			labels[i] = fmt.Sprintf("%d. %s", i+1, item.label)
+		}
+		return "History: " + strings.Join(labels, "  ·  ")
+	case commandActionClear:
+		return ""
 	default:
 		return ""
 	}
@@ -265,7 +289,17 @@ func (m model) handleShellCommand(raw string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.tryCurrentBench()
-	case commandActionStatus, commandActionMemory, commandActionWhatChanged, commandActionHelp:
+	case commandActionClear:
+		m.workshop = newWorkshopState()
+		m.forgeItemName = ""
+		m.forgeErr = ""
+		if err := ipc.ClearWorkshopStatus(); err != nil {
+			m.shellError = "Clear failed: " + err.Error()
+		} else {
+			m.shellNotice = "Bench cleared."
+		}
+		return m, nil
+	case commandActionStatus, commandActionMemory, commandActionWhatChanged, commandActionHelp, commandActionHistory:
 		if response := m.shellInfoResponse(route); response != "" {
 			m.shellNotice = response
 			m.workshopNotice = response
