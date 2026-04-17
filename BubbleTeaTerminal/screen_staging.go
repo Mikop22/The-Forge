@@ -322,6 +322,14 @@ func (m model) stagingView() string {
 		}
 
 		if m.revealPhase >= 3 {
+			if !m.termCompact {
+				if preview := renderCombatPreview(latest, m.forgeManifest, m.animTick, m.contentWidth); preview != "" {
+					headerLines = append(headerLines, "")
+					headerLines = append(headerLines, styles.SpriteFrame.Render(styles.Meta.Render("Combat Preview")))
+					headerLines = append(headerLines, preview)
+				}
+			}
+
 			sprite := renderSprite(latest.spritePath)
 			projSprite := renderSprite(latest.projSpritePath)
 			stats := renderStats(latest.stats)
