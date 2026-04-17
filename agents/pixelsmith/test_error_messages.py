@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+import os
+
+import pytest
+from unittest.mock import patch
+
 from pixelsmith.pixelsmith import friendly_generation_error
 
 
@@ -24,3 +31,12 @@ def test_unknown_error_passes_through():
 def test_fal_key_missing_maps_to_friendly():
     msg = friendly_generation_error("FAL_KEY (or FAL_API_KEY) is required for Pixelsmith.")
     assert "api key" in msg.lower() or "fal" in msg.lower(), msg
+
+
+def test_artist_agent_fails_fast_on_missing_fal_key(tmp_path):
+    """ArtistAgent should raise at __init__ if FAL_KEY is absent."""
+    env = {k: v for k, v in os.environ.items() if k not in ("FAL_KEY", "FAL_API_KEY")}
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises((RuntimeError, ValueError), match="FAL"):
+            from pixelsmith.pixelsmith import ArtistAgent
+            ArtistAgent(output_dir=str(tmp_path))
